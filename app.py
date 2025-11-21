@@ -8,7 +8,7 @@ st.set_page_config(page_title="بوتيك كلاود", layout="wide", page_icon=
 
 # --- دوال قاعدة البيانات ---
 def init_db():
-    conn = sqlite3.connect('boutique_web.db', check_same_thread=False)
+    conn = sqlite3.connect('boutique_web_v2.db', check_same_thread=False)
     c = conn.cursor()
     
     # جدول المنتجات (كما هو)
