@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # --- إعداد الصفحة ---
-st.set_page_config(page_title="Nawaem Stock Master", layout="wide", page_icon="👗", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Nawaem Copy Master", layout="wide", page_icon="🌸", initial_sidebar_state="collapsed")
 
 # --- CSS ---
 st.markdown("""
@@ -17,21 +17,12 @@ st.markdown("""
         border-radius: 10px;
         font-weight: bold;
     }
-    /* تنسيق بطاقة المنتج */
     .stock-card {
         background-color: #f9f9f9;
         padding: 10px;
         border-radius: 10px;
         border: 1px solid #eee;
         margin-bottom: 10px;
-    }
-    /* تنسيق عرض القياسات */
-    .size-tag {
-        background-color: #e0e0e0;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.9em;
-        margin-left: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -41,6 +32,11 @@ if 'cart' not in st.session_state:
     st.session_state.cart = []
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
+# متغير جديد لحفظ حالة نجاح البيع لعرض الرسالة
+if 'sale_success' not in st.session_state:
+    st.session_state.sale_success = False
+if 'last_invoice_text' not in st.session_state:
+    st.session_state.last_invoice_text = ""
 
 # --- 2. قاعدة البيانات ---
 def init_db():
@@ -104,8 +100,8 @@ def edit_stock_dialog(item_id, name, color, size, cost, price, stock):
 
 # --- 4. الدخول ---
 def login_screen():
-    st.title("👗 نواعم")
-    if st.button("دخول سريع"): # يمكنك ارجاع الباسوورد هنا
+    st.title("🌸 نواعم بوتيك")
+    if st.button("دخول للنظام"):
         st.session_state.logged_in = True
         st.rerun()
 
@@ -113,51 +109,91 @@ def login_screen():
 def main_app():
     tabs = st.tabs(["🛒 بيع", "📋 سجل", "📦 مخزن", "🏠 تقرير"])
 
-    # === 1. البيع ===
+    # === 1. البيع (تم التعديل هنا للنسخ) ===
     with tabs[0]:
-        with st.container(border=True):
-            df = pd.read_sql("SELECT * FROM variants WHERE stock > 0", conn)
-            srch = st.text_input("🔍 بحث...", label_visibility="collapsed")
-            if srch:
-                mask = df['name'].str.contains(srch, case=False) | df['color'].str.contains(srch, case=False)
-                df = df[mask]
+        # إذا تمت العملية بنجاح، نعرض الرسالة وزر النسخ
+        if st.session_state.sale_success:
+            st.success("✅ تم حجز الطلب بنجاح!")
+            st.balloons()
             
-            if not df.empty:
-                opts = df.apply(lambda x: f"{x['name']} | {x['color']} ({x['size']})", axis=1).tolist()
-                sel = st.selectbox("اختر:", opts, label_visibility="collapsed")
-                if sel:
-                    r = df[df.apply(lambda x: f"{x['name']} | {x['color']} ({x['size']})", axis=1) == sel].iloc[0]
-                    st.caption(f"سعر: {r['price']:,.0f} | متوفر: {r['stock']}")
-                    c1, c2 = st.columns(2)
-                    q = c1.number_input("العدد", 1, int(r['stock']), 1)
-                    p = c2.number_input("سعر", value=float(r['price']))
-                    if st.button("أضف للسلة ➕", type="primary"):
-                        st.session_state.cart.append({
-                            "id": int(r['id']), "name": r['name'], "color": r['color'], "size": r['size'],
-                            "cost": r['cost'], "price": p, "qty": q, "total": p*q
-                        })
-                        st.toast("تمت الإضافة", icon="✅")
+            st.markdown("### 📋 انسخ النص التالي للزبونة:")
+            # هنا نعرض النص داخل كود بلوك ليظهر زر النسخ تلقائياً
+            st.code(st.session_state.last_invoice_text, language="text")
+            
+            if st.button("🔄 بدء طلب جديد (مسح الشاشة)", type="primary"):
+                st.session_state.sale_success = False
+                st.session_state.last_invoice_text = ""
+                st.rerun()
+        
+        else:
+            # واجهة البيع العادية
+            with st.container(border=True):
+                df = pd.read_sql("SELECT * FROM variants WHERE stock > 0", conn)
+                srch = st.text_input("🔍 بحث...", label_visibility="collapsed")
+                if srch:
+                    mask = df['name'].str.contains(srch, case=False) | df['color'].str.contains(srch, case=False)
+                    df = df[mask]
+                
+                if not df.empty:
+                    opts = df.apply(lambda x: f"{x['name']} | {x['color']} ({x['size']})", axis=1).tolist()
+                    sel = st.selectbox("اختر:", opts, label_visibility="collapsed")
+                    if sel:
+                        r = df[df.apply(lambda x: f"{x['name']} | {x['color']} ({x['size']})", axis=1) == sel].iloc[0]
+                        st.caption(f"سعر: {r['price']:,.0f} | متوفر: {r['stock']}")
+                        c1, c2 = st.columns(2)
+                        q = c1.number_input("العدد", 1, int(r['stock']), 1)
+                        p = c2.number_input("سعر", value=float(r['price']))
+                        if st.button("أضف للسلة ➕", type="secondary"):
+                            st.session_state.cart.append({
+                                "id": int(r['id']), "name": r['name'], "color": r['color'], "size": r['size'],
+                                "cost": r['cost'], "price": p, "qty": q, "total": p*q
+                            })
+                            st.toast("تمت الإضافة", icon="✅")
 
-        if st.session_state.cart:
-            st.divider()
-            tot = 0
-            for i, x in enumerate(st.session_state.cart):
-                with st.container(border=True):
-                    ca, cb = st.columns([1,5])
-                    if ca.button("❌", key=f"d{i}"): st.session_state.cart.pop(i); st.rerun()
-                    cb.markdown(f"**{x['name']}** ({x['qty']}) - {x['total']:,.0f}")
-                    tot += x['total']
-            st.metric("الإجمالي", f"{tot:,.0f}")
-            if st.button("✅ إتمام البيع"):
-                inv = datetime.now().strftime("%Y%m%d%H%M")
-                dt = datetime.now().strftime("%Y-%m-%d %H:%M")
-                cur = conn.cursor()
-                for x in st.session_state.cart:
-                    cur.execute("UPDATE variants SET stock=stock-? WHERE id=?", (x['qty'], x['id']))
-                    prf = (x['price']-x['cost'])*x['qty']
-                    cur.execute("INSERT INTO sales (product_name, variant_id, qty, total, profit, date, invoice_id) VALUES (?,?,?,?,?,?,?)",
-                                (x['name'], x['id'], x['qty'], x['total'], prf, dt, inv))
-                conn.commit(); st.session_state.cart=[]; st.balloons(); st.success("تم البيع!"); st.rerun()
+            if st.session_state.cart:
+                st.divider()
+                tot = 0
+                # تحضير نص الرسالة أثناء التجميع
+                invoice_msg = "تم حجز الطلب ✅\n"
+                
+                for i, x in enumerate(st.session_state.cart):
+                    with st.container(border=True):
+                        ca, cb = st.columns([1,5])
+                        if ca.button("❌", key=f"d{i}"): st.session_state.cart.pop(i); st.rerun()
+                        cb.markdown(f"**{x['name']}** ({x['qty']}) - {x['total']:,.0f}")
+                        tot += x['total']
+                    
+                    # بناء النص حسب النموذج المطلوب لكل قطعة
+                    invoice_msg += f"{x['name']}\n"
+                    invoice_msg += f"{x['color']}\n"
+                    invoice_msg += f"{x['size']}\n"
+                    # فاصل صغير اذا كان هناك اكثر من قطعة
+                    if len(st.session_state.cart) > 1:
+                        invoice_msg += "---\n"
+
+                st.metric("الإجمالي", f"{tot:,.0f}")
+                
+                # تكملة نص الرسالة
+                invoice_msg += f"{tot:,.0f}\n"
+                invoice_msg += "التوصيل مجاني\n"
+                invoice_msg += "الف عافية حياتي 🌸🌸🌸🌸"
+
+                if st.button("✅ إتمام البيع ونسخ الرسالة", type="primary"):
+                    inv = datetime.now().strftime("%Y%m%d%H%M")
+                    dt = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    cur = conn.cursor()
+                    for x in st.session_state.cart:
+                        cur.execute("UPDATE variants SET stock=stock-? WHERE id=?", (x['qty'], x['id']))
+                        prf = (x['price']-x['cost'])*x['qty']
+                        cur.execute("INSERT INTO sales (product_name, variant_id, qty, total, profit, date, invoice_id) VALUES (?,?,?,?,?,?,?)",
+                                    (x['name'], x['id'], x['qty'], x['total'], prf, dt, inv))
+                    conn.commit()
+                    
+                    # حفظ الحالة والنص للانتقال لشاشة النجاح
+                    st.session_state.cart = []
+                    st.session_state.sale_success = True
+                    st.session_state.last_invoice_text = invoice_msg
+                    st.rerun()
 
     # === 2. السجل ===
     with tabs[1]:
@@ -170,7 +206,7 @@ def main_app():
                 if c2.button("⚙️", key=f"e{r['id']}"):
                     edit_sale_dialog(r['id'], r['qty'], r['total'], r['variant_id'], r['product_name'])
 
-    # === 3. المخزون (التصميم الجديد) ===
+    # === 3. المخزون ===
     with tabs[2]:
         with st.expander("➕ إضافة جديد"):
             with st.form("add"):
@@ -181,7 +217,6 @@ def main_app():
                 pr = st.number_input("بيع", 0.0)
                 cst = st.number_input("كلفة", 0.0)
                 if st.form_submit_button("توليد"):
-                    # كود التوليد المختصر
                     for c in cl.replace('،',',').split(','):
                         for s in sz.replace('،',',').split(','):
                             if c.strip() and s.strip():
@@ -190,52 +225,29 @@ def main_app():
                     conn.commit(); st.rerun()
 
         st.divider()
-        st.caption("📦 حالة المخزون (المتوفر فقط)")
-        
-        # --- منطق العرض الجديد (Grouping) ---
-        # 1. جلب البضاعة المتوفرة فقط
         df_inv = pd.read_sql("SELECT * FROM variants WHERE stock > 0 ORDER BY name", conn)
-        
         if not df_inv.empty:
-            # 2. استخراج أسماء الموديلات الفريدة
             unique_products = df_inv['name'].unique()
-            
             for product in unique_products:
-                # 3. فلترة البيانات لهذا المنتج فقط
                 prod_df = df_inv[df_inv['name'] == product]
-                
-                # 4. إنشاء البطاقة
                 with st.container(border=True):
-                    # العنوان والسعر
                     avg_price = prod_df['price'].max()
                     st.markdown(f"#### 👗 {product}")
-                    st.caption(f"سعر البيع: {avg_price:,.0f} د.ع")
-                    
-                    # 5. عرض الألوان والقياسات بشكل مجمع
-                    # تجميع حسب اللون
+                    st.caption(f"سعر: {avg_price:,.0f}")
                     unique_colors = prod_df['color'].unique()
                     for color in unique_colors:
                         color_variants = prod_df[prod_df['color'] == color]
-                        
-                        # تشكيل نص القياسات: S (3) | M (1)
                         size_display = []
                         for _, row in color_variants.iterrows():
                             size_display.append(f"{row['size']} (<b>{row['stock']}</b>)")
-                        
                         sizes_str = "  |  ".join(size_display)
-                        
-                        # عرض سطر اللون
                         st.markdown(f"🎨 **{color}:** &nbsp; {sizes_str}", unsafe_allow_html=True)
-                    
-                    # 6. زر التعديل (مخفي داخل Expander للحفاظ على البساطة)
-                    with st.expander("⚙️ إدارة الأصناف الفردية"):
+                    with st.expander("⚙️ تعديل"):
                         for _, row in prod_df.iterrows():
                             c_info, c_btn = st.columns([3, 1])
-                            c_info.text(f"{row['color']} - {row['size']} (العدد: {row['stock']})")
+                            c_info.text(f"{row['color']} - {row['size']} ({row['stock']})")
                             if c_btn.button("تعديل", key=f"stk_ed_{row['id']}"):
                                 edit_stock_dialog(row['id'], row['name'], row['color'], row['size'], row['cost'], row['price'], row['stock'])
-        else:
-            st.info("المخزن فارغ أو الكميات نفذت")
 
     # === 4. تقرير ===
     with tabs[3]:
