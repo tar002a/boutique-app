@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # --- إعداد الصفحة ---
-st.set_page_config(page_title="Nawaem Copy Master", layout="wide", page_icon="🌸", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Nawaem Pro System", layout="wide", page_icon="🛍️", initial_sidebar_state="collapsed")
 
 # --- CSS ---
 st.markdown("""
@@ -32,7 +32,6 @@ if 'cart' not in st.session_state:
     st.session_state.cart = []
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-# متغير جديد لحفظ حالة نجاح البيع لعرض الرسالة
 if 'sale_success' not in st.session_state:
     st.session_state.sale_success = False
 if 'last_invoice_text' not in st.session_state:
@@ -42,12 +41,18 @@ if 'last_invoice_text' not in st.session_state:
 def init_db():
     conn = sqlite3.connect('boutique_v3.db', check_same_thread=False)
     c = conn.cursor()
+    
+    # المنتجات
     c.execute("""CREATE TABLE IF NOT EXISTS variants (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, color TEXT, size TEXT, cost REAL, price REAL, stock INTEGER
     )""")
+    
+    # العملاء (تم التأكد من وجوده)
     c.execute("""CREATE TABLE IF NOT EXISTS customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, phone TEXT, address TEXT, username TEXT
     )""")
+    
+    # المبيعات (تم التأكد من وجود customer_id)
     c.execute("""CREATE TABLE IF NOT EXISTS sales (
         id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, variant_id INTEGER, product_name TEXT, 
         qty INTEGER, total REAL, profit REAL, date TEXT, invoice_id TEXT
@@ -57,7 +62,7 @@ def init_db():
 
 conn = init_db()
 
-# --- 3. النوافذ المنبثقة (Dialogs) ---
+# --- 3. النوافذ المنبثقة ---
 @st.dialog("تعديل عملية بيع")
 def edit_sale_dialog(sale_id, current_qty, current_total, variant_id, product_name):
     st.warning(f"فاتورة: {product_name}")
@@ -98,38 +103,35 @@ def edit_stock_dialog(item_id, name, color, size, cost, price, stock):
         conn.execute("DELETE FROM variants WHERE id=?", (item_id,))
         conn.commit(); st.rerun()
 
-# --- 4. الدخول ---
+# --- 4. تسجيل الدخول ---
 def login_screen():
     st.title("🌸 نواعم بوتيك")
     if st.button("دخول للنظام"):
         st.session_state.logged_in = True
         st.rerun()
 
-# --- 5. التطبيق ---
+# --- 5. التطبيق الرئيسي ---
 def main_app():
-    tabs = st.tabs(["🛒 بيع", "📋 سجل", "📦 مخزن", "🏠 تقرير"])
+    # إضافة تبويب العملاء
+    tabs = st.tabs(["🛒 بيع", "📋 سجل", "👥 عملاء", "📦 مخزن", "🏠 تقرير"])
 
-    # === 1. البيع (تم التعديل هنا للنسخ) ===
+    # === 1. البيع ===
     with tabs[0]:
-        # إذا تمت العملية بنجاح، نعرض الرسالة وزر النسخ
         if st.session_state.sale_success:
-            st.success("✅ تم حجز الطلب بنجاح!")
+            st.success("✅ تم حجز الطلب وحفظ بيانات العميل!")
             st.balloons()
-            
-            st.markdown("### 📋 انسخ النص التالي للزبونة:")
-            # هنا نعرض النص داخل كود بلوك ليظهر زر النسخ تلقائياً
+            st.markdown("### 📋 انسخ الرسالة:")
             st.code(st.session_state.last_invoice_text, language="text")
             
-            if st.button("🔄 بدء طلب جديد (مسح الشاشة)", type="primary"):
+            if st.button("🔄 طلب جديد", type="primary"):
                 st.session_state.sale_success = False
                 st.session_state.last_invoice_text = ""
                 st.rerun()
-        
         else:
-            # واجهة البيع العادية
+            # اختيار المنتجات
             with st.container(border=True):
                 df = pd.read_sql("SELECT * FROM variants WHERE stock > 0", conn)
-                srch = st.text_input("🔍 بحث...", label_visibility="collapsed")
+                srch = st.text_input("🔍 بحث عن منتج...", label_visibility="collapsed")
                 if srch:
                     mask = df['name'].str.contains(srch, case=False) | df['color'].str.contains(srch, case=False)
                     df = df[mask]
@@ -150,64 +152,105 @@ def main_app():
                             })
                             st.toast("تمت الإضافة", icon="✅")
 
+            # السلة وإتمام البيع
             if st.session_state.cart:
                 st.divider()
+                st.markdown("##### بيانات العميل (مطلوب)")
+                
+                # --- قسم بيانات العميل (تمت إعادته) ---
+                with st.container(border=True):
+                    cust_type = st.radio("نوع العميل", ["جديد", "سابق"], horizontal=True)
+                    cust_id_val, cust_name_val = None, ""
+                    
+                    if cust_type == "سابق":
+                        curr_custs = pd.read_sql("SELECT id, name, phone FROM customers", conn)
+                        if not curr_custs.empty:
+                            c_sel = st.selectbox("ابحث عن الاسم:", curr_custs.apply(lambda x: f"{x['name']} - {x['phone']}", axis=1).tolist())
+                            cust_name_val = c_sel.split(" - ")[0]
+                            cust_id_val = curr_custs[curr_custs['name'] == cust_name_val]['id'].iloc[0]
+                        else:
+                            st.warning("لا يوجد عملاء سابقين")
+                    else:
+                        c_n = st.text_input("الاسم")
+                        c_p = st.text_input("الهاتف")
+                        c_a = st.text_input("العنوان")
+                        cust_name_val = c_n
+                
+                # عرض السلة
                 tot = 0
-                # تحضير نص الرسالة أثناء التجميع
                 invoice_msg = "تم حجز الطلب ✅\n"
                 
                 for i, x in enumerate(st.session_state.cart):
-                    with st.container(border=True):
-                        ca, cb = st.columns([1,5])
-                        if ca.button("❌", key=f"d{i}"): st.session_state.cart.pop(i); st.rerun()
-                        cb.markdown(f"**{x['name']}** ({x['qty']}) - {x['total']:,.0f}")
-                        tot += x['total']
-                    
-                    # بناء النص حسب النموذج المطلوب لكل قطعة
-                    invoice_msg += f"{x['name']}\n"
-                    invoice_msg += f"{x['color']}\n"
-                    invoice_msg += f"{x['size']}\n"
-                    # فاصل صغير اذا كان هناك اكثر من قطعة
-                    if len(st.session_state.cart) > 1:
-                        invoice_msg += "---\n"
-
-                st.metric("الإجمالي", f"{tot:,.0f}")
+                    tot += x['total']
+                    invoice_msg += f"{x['name']}\n{x['color']}\n{x['size']}\n"
+                    if len(st.session_state.cart) > 1: invoice_msg += "---\n"
                 
-                # تكملة نص الرسالة
-                invoice_msg += f"{tot:,.0f}\n"
-                invoice_msg += "التوصيل مجاني\n"
-                invoice_msg += "الف عافية حياتي 🌸🌸🌸🌸"
+                invoice_msg += f"{tot:,.0f}\nالتوصيل مجاني\nالف عافية حياتي 🌸🌸🌸🌸"
+                
+                st.markdown(f"**الإجمالي: {tot:,.0f} د.ع**")
 
-                if st.button("✅ إتمام البيع ونسخ الرسالة", type="primary"):
+                # زر الإتمام
+                if st.button("✅ إتمام البيع ونسخ", type="primary"):
+                    # التحقق من اسم العميل
+                    if not cust_name_val:
+                        st.error("⚠️ يجب إدخال اسم العميل!")
+                        st.stop()
+                    
+                    cur = conn.cursor()
+                    # حفظ العميل الجديد
+                    if cust_type == "جديد":
+                        cur.execute("INSERT INTO customers (name, phone, address) VALUES (?,?,?)", (c_n, c_p, c_a))
+                        cust_id_val = cur.lastrowid
+                    
                     inv = datetime.now().strftime("%Y%m%d%H%M")
                     dt = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    cur = conn.cursor()
+                    
+                    # حفظ المبيعات
                     for x in st.session_state.cart:
                         cur.execute("UPDATE variants SET stock=stock-? WHERE id=?", (x['qty'], x['id']))
                         prf = (x['price']-x['cost'])*x['qty']
-                        cur.execute("INSERT INTO sales (product_name, variant_id, qty, total, profit, date, invoice_id) VALUES (?,?,?,?,?,?,?)",
-                                    (x['name'], x['id'], x['qty'], x['total'], prf, dt, inv))
-                    conn.commit()
+                        # هنا يتم حفظ customer_id
+                        cur.execute("INSERT INTO sales (customer_id, variant_id, product_name, qty, total, profit, date, invoice_id) VALUES (?,?,?,?,?,?,?,?)",
+                                    (cust_id_val, x['id'], x['name'], x['qty'], x['total'], prf, dt, inv))
                     
-                    # حفظ الحالة والنص للانتقال لشاشة النجاح
+                    conn.commit()
                     st.session_state.cart = []
                     st.session_state.sale_success = True
                     st.session_state.last_invoice_text = invoice_msg
                     st.rerun()
 
-    # === 2. السجل ===
+    # === 2. السجل (تم الإصلاح لإظهار اسم العميل) ===
     with tabs[1]:
-        df_s = pd.read_sql("SELECT * FROM sales ORDER BY id DESC LIMIT 20", conn)
+        st.caption("آخر 30 عملية بيع")
+        # ربط الجدولين لإظهار الاسم
+        df_s = pd.read_sql("""
+            SELECT s.*, c.name as customer_name 
+            FROM sales s 
+            LEFT JOIN customers c ON s.customer_id = c.id 
+            ORDER BY s.id DESC LIMIT 30
+        """, conn)
+        
         for i, r in df_s.iterrows():
             with st.container(border=True):
                 c1, c2 = st.columns([4,1])
+                # عرض اسم العميل بوضوح
+                c_name = r['customer_name'] if r['customer_name'] else "غير مسجل"
                 c1.markdown(f"**{r['product_name']}** ({r['qty']})")
-                c1.caption(f"{r['date']} | {r['total']:,.0f}")
+                c1.caption(f"👤 {c_name} | 📅 {r['date']} | 💰 {r['total']:,.0f}")
                 if c2.button("⚙️", key=f"e{r['id']}"):
                     edit_sale_dialog(r['id'], r['qty'], r['total'], r['variant_id'], r['product_name'])
 
-    # === 3. المخزون ===
+    # === 3. العملاء (تبويب جديد) ===
     with tabs[2]:
+        st.header("قائمة المشترين")
+        df_cust = pd.read_sql("SELECT * FROM customers ORDER BY id DESC", conn)
+        if not df_cust.empty:
+            st.dataframe(df_cust, use_container_width=True)
+        else:
+            st.info("لا يوجد عملاء مسجلين بعد")
+
+    # === 4. المخزون ===
+    with tabs[3]:
         with st.expander("➕ إضافة جديد"):
             with st.form("add"):
                 nm = st.text_input("اسم")
@@ -223,34 +266,26 @@ def main_app():
                                 conn.execute("INSERT INTO variants (name,color,size,stock,price,cost) VALUES (?,?,?,?,?,?)",
                                              (nm, c.strip(), s.strip(), stk, pr, cst))
                     conn.commit(); st.rerun()
-
+        
         st.divider()
         df_inv = pd.read_sql("SELECT * FROM variants WHERE stock > 0 ORDER BY name", conn)
         if not df_inv.empty:
-            unique_products = df_inv['name'].unique()
-            for product in unique_products:
-                prod_df = df_inv[df_inv['name'] == product]
+            products = df_inv['name'].unique()
+            for p in products:
                 with st.container(border=True):
-                    avg_price = prod_df['price'].max()
-                    st.markdown(f"#### 👗 {product}")
-                    st.caption(f"سعر: {avg_price:,.0f}")
-                    unique_colors = prod_df['color'].unique()
-                    for color in unique_colors:
-                        color_variants = prod_df[prod_df['color'] == color]
-                        size_display = []
-                        for _, row in color_variants.iterrows():
-                            size_display.append(f"{row['size']} (<b>{row['stock']}</b>)")
-                        sizes_str = "  |  ".join(size_display)
-                        st.markdown(f"🎨 **{color}:** &nbsp; {sizes_str}", unsafe_allow_html=True)
-                    with st.expander("⚙️ تعديل"):
-                        for _, row in prod_df.iterrows():
-                            c_info, c_btn = st.columns([3, 1])
-                            c_info.text(f"{row['color']} - {row['size']} ({row['stock']})")
-                            if c_btn.button("تعديل", key=f"stk_ed_{row['id']}"):
-                                edit_stock_dialog(row['id'], row['name'], row['color'], row['size'], row['cost'], row['price'], row['stock'])
+                    pdf = df_inv[df_inv['name']==p]
+                    st.markdown(f"#### 👗 {p}")
+                    st.caption(f"سعر: {pdf['price'].max():,.0f}")
+                    for c in pdf['color'].unique():
+                        szs = " | ".join([f"{r['size']} ({r['stock']})" for _,r in pdf[pdf['color']==c].iterrows()])
+                        st.markdown(f"🎨 {c}: {szs}")
+                    with st.expander("تعديل"):
+                        for _,r in pdf.iterrows():
+                            if st.button(f"تعديل {r['color']} {r['size']}", key=f"bx{r['id']}"):
+                                edit_stock_dialog(r['id'], r['name'], r['color'], r['size'], r['cost'], r['price'], r['stock'])
 
-    # === 4. تقرير ===
-    with tabs[3]:
+    # === 5. تقرير ===
+    with tabs[4]:
         today = datetime.now().strftime("%Y-%m-%d")
         df_tdy = pd.read_sql(f"SELECT SUM(total), SUM(profit) FROM sales WHERE date LIKE '{today}%'", conn).iloc[0]
         st.metric("مبيعات اليوم", f"{df_tdy[0] or 0:,.0f}")
