@@ -163,12 +163,10 @@ def main_app():
                         r = df[df.apply(lambda x: f"{x['name']} | {x['color']} ({x['size']})", axis=1) == sel].iloc[0]
                         st.caption(f"سعر: {r['price']:,.0f} | متوفر: {r['stock']}")
                         c1, c2 = st.columns(2)
-                        # تحويل القيم هنا لضمان أنها أرقام بايثون
                         q = c1.number_input("العدد", 1, int(r['stock']), 1)
                         p = c2.number_input("سعر", value=float(r['price']))
                         
                         if st.button("أضف للسلة ➕", type="secondary"):
-                            # التأكد من تحويل كل شيء إلى int/float عادي
                             item_dict = {
                                 "id": int(r['id']), 
                                 "name": r['name'], 
@@ -226,19 +224,12 @@ def main_app():
                             dt = baghdad_now.strftime("%Y-%m-%d %H:%M")
                             
                             for x in st.session_state.cart:
-                                # 1. تحديث المخزون
                                 cur.execute("UPDATE public.variants SET stock=stock-%s WHERE id=%s", (int(x['qty']), int(x['id'])))
-                                
-                                # 2. حساب الربح وتحويله إلى float صريح
                                 profit_calc = (x['price'] - x['cost']) * x['qty']
-                                final_profit = float(profit_calc)
-                                final_total = float(x['total'])
-                                
-                                # 3. الإدخال
                                 cur.execute("""
                                     INSERT INTO public.sales (customer_id, variant_id, product_name, qty, total, profit, date, invoice_id) 
                                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                                """, (int(cust_id_val), int(x['id']), x['name'], int(x['qty']), final_total, final_profit, dt, inv))
+                                """, (int(cust_id_val), int(x['id']), x['name'], int(x['qty']), float(x['total']), float(profit_calc), dt, inv))
                             
                             conn.commit()
                             st.session_state.cart = []
@@ -273,20 +264,53 @@ def main_app():
 
     # === 4. المخزون ===
     with tabs[3]:
-        with st.expander("➕ إضافة جديد"):
+        with st.expander("➕ إضافة مخزون (جديد أو حالي)"):
             with st.form("add"):
-                nm = st.text_input("اسم"); cl = st.text_input("ألوان (،)"); sz = st.text_input("قياسات (،)")
-                stk = st.number_input("عدد", 1); pr = st.number_input("بيع", 0.0); cst = st.number_input("كلفة", 0.0)
-                if st.form_submit_button("توليد"):
+                nm = st.text_input("اسم")
+                cl = st.text_input("ألوان (افصل بفاصلة ،)")
+                sz = st.text_input("قياسات (افصل بفاصلة ،)")
+                stk = st.number_input("العدد (للواحدة)", 1)
+                pr = st.number_input("سعر البيع", 0.0)
+                cst = st.number_input("سعر التكلفة", 0.0)
+                
+                if st.form_submit_button("حفظ في المخزن"):
                     try:
                         with conn.cursor() as cur:
-                            for c in cl.replace('،',',').split(','):
-                                for s in sz.replace('،',',').split(','):
-                                    if c.strip() and s.strip(): 
-                                        cur.execute("INSERT INTO public.variants (name,color,size,stock,price,cost) VALUES (%s,%s,%s,%s,%s,%s)", 
-                                                     (nm, c.strip(), s.strip(), int(stk), float(pr), float(cst)))
-                            conn.commit(); st.rerun()
-                    except: conn.rollback()
+                            colors = [c.strip() for c in cl.replace('،',',').split(',') if c.strip()]
+                            sizes = [s.strip() for s in sz.replace('،',',').split(',') if s.strip()]
+                            
+                            for c in colors:
+                                for s in sizes:
+                                    # 1. التحقق هل القطعة موجودة؟
+                                    cur.execute("""
+                                        SELECT id FROM public.variants 
+                                        WHERE name=%s AND color=%s AND size=%s
+                                    """, (nm, c, s))
+                                    existing = cur.fetchone()
+                                    
+                                    if existing:
+                                        # 2. تحديث الموجود
+                                        v_id = existing[0]
+                                        cur.execute("""
+                                            UPDATE public.variants 
+                                            SET stock = stock + %s, price = %s, cost = %s 
+                                            WHERE id = %s
+                                        """, (int(stk), float(pr), float(cst), v_id))
+                                        st.toast(f"تم تحديث: {nm} - {c} - {s}", icon="🔄")
+                                    else:
+                                        # 3. إضافة جديد
+                                        cur.execute("""
+                                            INSERT INTO public.variants (name,color,size,stock,price,cost) 
+                                            VALUES (%s,%s,%s,%s,%s,%s)
+                                        """, (nm, c, s, int(stk), float(pr), float(cst)))
+                                        st.toast(f"تمت إضافة: {nm} - {c} - {s}", icon="✅")
+                                        
+                            conn.commit()
+                            # st.rerun() # إزالة إعادة التشغيل لرؤية الرسائل المنبثقة
+                    except Exception as e:
+                        conn.rollback()
+                        st.error(f"خطأ: {e}")
+
         st.divider()
         try:
             df_inv = pd.read_sql("SELECT * FROM public.variants WHERE stock > 0 ORDER BY name", conn)
