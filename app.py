@@ -101,7 +101,8 @@ def run_query(query, params=(), fetch=False, commit=True):
                 
                 # إذا كان الاستعلام يطلب إرجاع ID (مثل إضافة عميل جديد)
                 last_id = None
-                if "RETURNING id" in query.upper():
+                # تصحيح: التأكد من حالة الأحرف عند البحث عن RETURNING ID
+                if "RETURNING ID" in query.upper():
                     last_id = cur.fetchone()[0]
                 
                 cur.close()
@@ -453,13 +454,17 @@ def main_app():
         
         today_str = get_baghdad_time().strftime("%Y-%m-%d")
         
-        # 1. إحصائيات اليوم
-        # نستخدم date_trunc أو تحويل النص للمقارنة في Postgres
-        today_query = f"SELECT SUM(total), SUM(profit) FROM sales WHERE date::text LIKE '{today_str}%'"
-        df_today = run_query(today_query, fetch=True)
+        # --- 1. إحصائيات اليوم (تم الإصلاح هنا) ---
+        # استخدام المعاملات %s بدلاً من f-string لتجنب مشكلة tuple index out of range
+        today_query = "SELECT SUM(total), SUM(profit) FROM sales WHERE TO_CHAR(date, 'YYYY-MM-DD') = %s"
+        df_today = run_query(today_query, (today_str,), fetch=True)
         
-        val_sales = df_today.iloc[0, 0] if df_today is not None and df_today.iloc[0, 0] else 0
-        val_profit = df_today.iloc[0, 1] if df_today is not None and df_today.iloc[0, 1] else 0
+        val_sales = 0
+        val_profit = 0
+        
+        if df_today is not None and not df_today.empty:
+            val_sales = df_today.iloc[0, 0] if df_today.iloc[0, 0] is not None else 0
+            val_profit = df_today.iloc[0, 1] if df_today.iloc[0, 1] is not None else 0
         
         col_r1, col_r2 = st.columns(2)
         col_r1.metric("مبيعات اليوم", f"{val_sales:,.0f} د.ع")
@@ -469,8 +474,13 @@ def main_app():
         
         # 2. قيمة المخزون (Assets)
         df_assets = run_query("SELECT SUM(stock * cost), SUM(stock * price) FROM variants", fetch=True)
-        asset_cost = df_assets.iloc[0, 0] if df_assets is not None and df_assets.iloc[0, 0] else 0
-        asset_rev = df_assets.iloc[0, 1] if df_assets is not None and df_assets.iloc[0, 1] else 0
+        
+        asset_cost = 0
+        asset_rev = 0
+        
+        if df_assets is not None and not df_assets.empty:
+            asset_cost = df_assets.iloc[0, 0] if df_assets.iloc[0, 0] is not None else 0
+            asset_rev = df_assets.iloc[0, 1] if df_assets.iloc[0, 1] is not None else 0
         
         st.subheader("💰 التقييم المالي للمخزون")
         ac1, ac2, ac3 = st.columns(3)
