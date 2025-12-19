@@ -694,20 +694,7 @@ def main_app():
                                         border_color = "#30D158" # Green
                                         bg_color = "rgba(48, 209, 88, 0.1)"
 
-                                    chips_html += f"""
-                                    <div style="
-                                        border: 1px solid {border_color}; 
-                                        background-color: {bg_color}; 
-                                        padding: 5px 12px; 
-                                        border-radius: 20px; 
-                                        font-size: 0.9em; 
-                                        display: flex; 
-                                        align-items: center; 
-                                        gap: 5px;">
-                                        <span style="font-weight: bold;">{row['size']}</span>
-                                        <span style="font-size: 0.8em; opacity: 0.8;">| {row['stock']} قطعة</span>
-                                    </div>
-                                    """
+                                    chips_html += f"""<div style="border: 1px solid {border_color}; background-color: {bg_color}; padding: 5px 12px; border-radius: 20px; font-size: 0.9em; display: flex; align-items: center; gap: 5px;"><span style="font-weight: bold;">{row['size']}</span><span style="font-size: 0.8em; opacity: 0.8;">| {row['stock']} قطعة</span></div>"""
                                 chips_html += "</div>"
                                 st.markdown(chips_html, unsafe_allow_html=True)
                             
