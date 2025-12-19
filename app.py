@@ -200,6 +200,8 @@ if 'sale_success' not in st.session_state:
     st.session_state.sale_success = False
 if 'last_invoice_text' not in st.session_state:
     st.session_state.last_invoice_text = ""
+if 'last_customer_username' not in st.session_state:
+    st.session_state.last_customer_username = None
 
 # --- 2. اتصال قاعدة البيانات (Supabase) ---
 @st.cache_resource
@@ -304,7 +306,14 @@ def main_app():
             st.balloons()
             st.markdown("### 📋 انسخ الرسالة:")
             st.code(st.session_state.last_invoice_text, language="text")
-            if st.button("🔄 طلب جديد", type="primary"):
+            
+            # Instagram Button
+            if st.session_state.last_customer_username:
+                ig_url = f"https://ig.me/m/{st.session_state.last_customer_username}"
+                st.link_button("� إرسال الفاتورة عبر انستغرام", ig_url, type="primary")
+            
+            st.divider()
+            if st.button("�🔄 طلب جديد", type="primary"):
                 st.session_state.sale_success = False; st.session_state.last_invoice_text = ""; st.rerun()
         else:
             with st.container(border=True):
@@ -369,19 +378,24 @@ def main_app():
                     cust_id_val, cust_name_val = None, ""
                     if cust_type == "سابق":
                         try:
-                            curr_custs = pd.read_sql("SELECT id, name, phone FROM public.customers", conn)
+                            curr_custs = pd.read_sql("SELECT id, name, phone, username FROM public.customers", conn)
                         except: curr_custs = pd.DataFrame()
                         
                         if not curr_custs.empty:
                             c_sel = st.selectbox("الاسم:", curr_custs.apply(lambda x: f"{x['name']} - {x['phone']}", axis=1).tolist())
                             cust_name_val = c_sel.split(" - ")[0]
-                            cust_id_val = int(curr_custs[curr_custs['name'] == cust_name_val]['id'].iloc[0])
+                            selected_row = curr_custs[curr_custs['name'] == cust_name_val].iloc[0]
+                            cust_id_val = int(selected_row['id'])
+                            # Auto-fill username if exists
+                            cust_username_val = selected_row['username'] if pd.notna(selected_row['username']) else ""
                         else: st.warning("لا يوجد")
                     else:
                         c_n = st.text_input("الاسم")
                         c_p = st.text_input("الهاتف")
+                        c_u = st.text_input("يوزر انستغرام (بدون @)")
                         c_a = st.text_input("العنوان")
                         cust_name_val = c_n
+                        cust_username_val = c_u
                 
                 tot = sum(x['total'] for x in st.session_state.cart)
                 
@@ -406,8 +420,11 @@ def main_app():
                     try:
                         with conn.cursor() as cur:
                             if cust_type == "جديد":
-                                cur.execute("INSERT INTO public.customers (name, phone, address) VALUES (%s,%s,%s) RETURNING id", (c_n, c_p, c_a))
+                                cur.execute("INSERT INTO public.customers (name, phone, address, username) VALUES (%s,%s,%s,%s) RETURNING id", (c_n, c_p, c_a, c_u))
                                 cust_id_val = cur.fetchone()[0]
+                            elif cust_type == "سابق" and cust_username_val:
+                                # Update username for existing customer if we found it (or if we add an edit feature later, but for now just using what we fetched)
+                                pass 
                             
                             baghdad_now = get_baghdad_time()
                             inv = baghdad_now.strftime("%Y%m%d%H%M")
@@ -425,6 +442,7 @@ def main_app():
                             st.session_state.cart = []
                             st.session_state.sale_success = True
                             st.session_state.last_invoice_text = invoice_msg
+                            st.session_state.last_customer_username = cust_username_val
                             st.rerun()
                     except Exception as e:
                         conn.rollback()
