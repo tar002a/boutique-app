@@ -194,19 +194,23 @@ def main_app():
                     cust_id_val, cust_name_val = None, ""
                     if cust_type == "سابق":
                         try:
-                            curr_custs = pd.read_sql("SELECT id, name, phone FROM public.customers", conn)
+                            curr_custs = pd.read_sql("SELECT id, name, phone, username FROM public.customers", conn)
                         except: curr_custs = pd.DataFrame()
                         
                         if not curr_custs.empty:
                             c_sel = st.selectbox("الاسم:", curr_custs.apply(lambda x: f"{x['name']} - {x['phone']}", axis=1).tolist())
                             cust_name_val = c_sel.split(" - ")[0]
-                            cust_id_val = int(curr_custs[curr_custs['name'] == cust_name_val]['id'].iloc[0])
+                            row = curr_custs[curr_custs['name'] == cust_name_val].iloc[0]
+                            cust_id_val = int(row['id'])
+                            cust_username_val = row['username'] if 'username' in row and row['username'] else ""
                         else: st.warning("لا يوجد")
                     else:
                         c_n = st.text_input("الاسم")
                         c_p = st.text_input("الهاتف")
                         c_a = st.text_input("العنوان")
+                        c_u = st.text_input("يوزر انستغرام (بدون @)")
                         cust_name_val = c_n
+                        cust_username_val = c_u
                 
                 tot = sum(x['total'] for x in st.session_state.cart)
                 invoice_msg = "تم حجز الطلب ✅\n"
@@ -222,7 +226,7 @@ def main_app():
                     try:
                         with conn.cursor() as cur:
                             if cust_type == "جديد":
-                                cur.execute("INSERT INTO public.customers (name, phone, address) VALUES (%s,%s,%s) RETURNING id", (c_n, c_p, c_a))
+                                cur.execute("INSERT INTO public.customers (name, phone, address, username) VALUES (%s,%s,%s,%s) RETURNING id", (c_n, c_p, c_a, c_u))
                                 cust_id_val = cur.fetchone()[0]
                             
                             baghdad_now = get_baghdad_time()
@@ -253,7 +257,10 @@ def main_app():
                                 st.warning("مكتبة النسخ غير مثبتة (pyperclip)")
                             
                             try:
-                                webbrowser.open("https://www.instagram.com/direct/inbox/")
+                                if cust_username_val:
+                                    webbrowser.open(f"https://ig.me/m/{cust_username_val}")
+                                else:
+                                    webbrowser.open("https://www.instagram.com/direct/inbox/")
                             except: pass
 
                             st.rerun()
