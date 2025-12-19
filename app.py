@@ -880,10 +880,10 @@ def main_app():
                 st.subheader("🏆 أكثر القطع مبيعاً")
                 df_top_items = pd.read_sql("""
                     SELECT 
-                        product_name as name, 
-                        SUM(qty) as total_qty,
+                        SUM(profit) as total_profit,
                         SUM(total) as total_sales,
-                        SUM(profit) as total_profit
+                        SUM(qty) as total_qty,
+                        product_name as name
                     FROM public.sales 
                     GROUP BY product_name 
                     ORDER BY SUM(profit) DESC 
@@ -914,9 +914,9 @@ def main_app():
                 st.subheader("🌟 أفضل الزبائن")
                 df_top_cust = pd.read_sql("""
                     SELECT 
-                        c.name as name, 
+                        SUM(s.total) as total_spend,
                         COUNT(s.id) as orders_count,
-                        SUM(s.total) as total_spend
+                        c.name as name
                     FROM public.sales s 
                     JOIN public.customers c ON s.customer_id = c.id
                     GROUP BY c.name 
