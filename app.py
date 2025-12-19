@@ -929,22 +929,30 @@ def main_app():
                     LIMIT 10
                 """, conn)
                 
-                if not df_top_cust.empty: 
-                    st.dataframe(
-                        df_top_cust,
-                        column_config={
-                            "name": st.column_config.TextColumn("العميل", width="medium"),
-                            "orders_count": st.column_config.NumberColumn("عدد الطلبات"),
-                            "total_spend": st.column_config.ProgressColumn(
-                                "مجموع الشراء", 
-                                format="%d د.ع",
-                                min_value=0,
-                                max_value=int(df_top_cust['total_spend'].max()),
-                            ),
-                        },
-                        use_container_width=True, 
-                        hide_index=True
-                    )
+                if not df_top_cust.empty:
+                    for i, r in df_top_cust.iterrows():
+                        rank = i + 1
+                        badge = "🏅"
+                        if rank == 1: badge = "🥇"
+                        elif rank == 2: badge = "🥈"
+                        elif rank == 3: badge = "🥉"
+                        else: badge = f"#{rank}"
+                        
+                        st.markdown(f"""
+                        <div class="css-card" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;">
+                            <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                                <div style="font-size: 1.5em; width: 40px; text-align: center;">{badge}</div>
+                                <div>
+                                    <div style="font-weight: 800; font-size: 1.1em; color: var(--text-color);">{r['name']}</div>
+                                    <div style="font-size: 0.8em; color: var(--subtext-color);">{r['orders_count']} طلبات</div>
+                                </div>
+                            </div>
+                            <div style="text-align: left;">
+                                <div style="font-weight: 800; color: var(--primary-color); font-size: 1.2em;">{r['total_spend']:,.0f}</div>
+                                <div style="font-size: 0.7em; color: var(--subtext-color);">د.ع</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True) 
                 else: st.info("لا توجد بيانات كافية")
 
             st.markdown("---")
