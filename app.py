@@ -18,15 +18,17 @@ st.markdown("""
     /* --- Imports --- */
     @import url('https://fonts.googleapis.com/css2?family=Almarai:wght@300;400;700;800&display=swap');
 
-    /* --- Roots --- */
+    /* --- Roots (Dark Mode) --- */
     :root {
         --primary-color: #B76E79; /* Dusty Rose */
         --secondary-color: #D4A5A5;
-        --bg-color: #F2F2F7;
-        --card-bg: #FFFFFF;
-        --text-color: #111111; /* Darker for contrast */
-        --subtext-color: #555555; /* Darker gray */
+        --bg-color: #1C1C1E; /* iOS High Contrast Dark */
+        --card-bg: #2C2C2E; /* Elevation 1 */
+        --text-color: #FFFFFF; /* High Contrast White */
+        --subtext-color: #AEAEB2; /* iOS Gray */
         --border-radius: 16px;
+        --input-bg: #2C2C2E;
+        --border-color: #3A3A3C;
     }
 
     /* --- Global RTL & Fonts --- */
@@ -37,10 +39,16 @@ st.markdown("""
         color: var(--text-color);
     }
     
-    /* Input Labels High Contrast */
+    /* Strict RTL Enforcement */
+    .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, div, label, .stButton, .stTextInput, .stNumberInput, .stSelectbox {
+        text-align: right !important;
+        direction: rtl !important;
+    }
+    
+    /* Input Labels */
     .stTextInput label, .stNumberInput label, .stSelectbox label {
-        color: #333333 !important;
-        font-weight: 700 !important;
+        color: var(--subtext-color) !important;
+        font-weight: 600 !important;
     }
     
     h1, h2, h3, h4, h5, h6 {
@@ -84,8 +92,8 @@ st.markdown("""
         padding: 20px;
         border-radius: var(--border-radius);
         text-align: center;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        border: 1px solid rgba(0,0,0,0.02);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        border: 1px solid var(--border-color);
         transition: transform 0.2s;
     }
     div[data-testid="metric-container"]:hover {
@@ -97,15 +105,25 @@ st.markdown("""
     }
 
     /* --- Inputs & Selectboxes --- */
+    /* --- Inputs & Selectboxes --- */
     div[data-baseweb="input"] {
-        background-color: #FFFFFF;
+        background-color: var(--input-bg);
         border-radius: 12px;
-        border: 1px solid #E5E5EA; /* iOS Separate */
+        border: 1px solid var(--border-color);
+        color: white;
+    }
+    div[data-baseweb="input"] input {
+        color: white !important; /* Ensure text is white */
+        background-color: transparent !important;
     }
     div[data-baseweb="select"] > div {
-        background-color: #FFFFFF;
+        background-color: var(--input-bg);
         border-radius: 12px;
-        border: 1px solid #E5E5EA;
+        border: 1px solid var(--border-color);
+        color: white;
+    }
+    div[data-baseweb="select"] span {
+        color: white !important;
     }
     
     /* --- Tabs (iOS Segmented Control Look) --- */
@@ -117,7 +135,7 @@ st.markdown("""
     }
     .stTabs [data-baseweb="tab"] {
         height: 45px;
-        background-color: rgba(255,255,255,0.5);
+        background-color: rgba(44, 44, 46, 0.5);
         border-radius: 10px;
         border: none;
         color: var(--subtext-color);
@@ -126,19 +144,20 @@ st.markdown("""
         box-shadow: none;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
+        background-color: #3A3A3C !important;
         color: var(--primary-color) !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }
 
+    /* --- Custom Item Card --- */
     /* --- Custom Item Card --- */
     .css-card {
         background-color: var(--card-bg);
         padding: 18px;
         border-radius: 16px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         margin-bottom: 12px;
-        border: 1px solid rgba(0,0,0,0.02);
+        border: 1px solid var(--border-color);
         transition: all 0.2s ease;
     }
     .css-card:hover {
@@ -326,11 +345,11 @@ def main_app():
                         st.markdown(f"""
                         <div class="css-card" style="display: flex; justify-content: space-between; align-items: center;">
                             <div style="text-align: right;">
-                                <div style="font-weight: 800; font-size: 1.1em; color: #1C1C1E;">{item['name']}</div>
-                                <div style="color: #8E8E93; font-size: 0.9em; margin-top: 4px;">{item['color']} | {item['size']}</div>
-                                <div style="color: #B76E79; font-weight: 600; margin-top: 4px;">{item['qty']} × {item['price']:,.0f}</div>
+                                <div style="font-weight: 800; font-size: 1.1em; color: var(--text-color);">{item['name']}</div>
+                                <div style="color: var(--subtext-color); font-size: 0.9em; margin-top: 4px;">{item['color']} | {item['size']}</div>
+                                <div style="color: var(--primary-color); font-weight: 600; margin-top: 4px;">{item['qty']} × {item['price']:,.0f}</div>
                             </div>
-                            <div style="text-align: left; font-weight: 800; color: #B76E79; font-size: 1.2em;">
+                            <div style="text-align: left; font-weight: 800; color: var(--primary-color); font-size: 1.2em;">
                                 {item['total']:,.0f}
                             </div>
                         </div>
@@ -369,9 +388,9 @@ def main_app():
                 
                 # Total Price Display
                 st.markdown(f"""
-                <div style="background-color: #e8f5e9; padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 20px; border: 1px solid #c8e6c9;">
-                    <div style="font-size: 0.9em; color: #2e7d32;">المجموع الكلي</div>
-                    <div style="font-size: 1.8em; font-weight: bold; color: #1b5e20;">{tot:,.0f} د.ع</div>
+                <div style="background-color: var(--input-bg); padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 20px; border: 1px solid var(--border-color);">
+                    <div style="font-size: 0.9em; color: var(--subtext-color);">المجموع الكلي</div>
+                    <div style="font-size: 1.8em; font-weight: bold; color: var(--primary-color);">{tot:,.0f} د.ع</div>
                 </div>
                 """, unsafe_allow_html=True)
 
