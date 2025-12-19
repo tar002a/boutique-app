@@ -566,68 +566,161 @@ def main_app():
 
     # === 4. المخزون ===
     with tabs[3]:
-        with st.expander("➕ إضافة مخزون (جديد أو حالي)"):
-            with st.form("add"):
-                nm = st.text_input("اسم")
-                cl = st.text_input("ألوان (افصل بفاصلة ،)")
-                sz = st.text_input("قياسات (افصل بفاصلة ،)")
-                stk = st.number_input("العدد (للواحدة)", 1)
-                pr = st.number_input("سعر البيع", 0.0)
-                cst = st.number_input("سعر التكلفة", 0.0)
-                
-                if st.form_submit_button("➕ حفظ في المخزن"):
-                    try:
-                        with conn.cursor() as cur:
-                            colors = [c.strip() for c in cl.replace('،',',').split(',') if c.strip()]
-                            sizes = [s.strip() for s in sz.replace('،',',').split(',') if s.strip()]
-                            
-                            for c in colors:
-                                for s in sizes:
-                                    # 1. التحقق هل القطعة موجودة؟
-                                    cur.execute("""
-                                        SELECT id FROM public.variants 
-                                        WHERE name=%s AND color=%s AND size=%s
-                                    """, (nm, c, s))
-                                    existing = cur.fetchone()
-                                    
-                                    if existing:
-                                        # 2. تحديث الموجود
-                                        v_id = existing[0]
-                                        cur.execute("""
-                                            UPDATE public.variants 
-                                            SET stock = stock + %s, price = %s, cost = %s 
-                                            WHERE id = %s
-                                        """, (int(stk), float(pr), float(cst), v_id))
-                                        st.toast(f"تم تحديث: {nm} - {c} - {s}", icon="🔄")
-                                    else:
-                                        # 3. إضافة جديد
-                                        cur.execute("""
-                                            INSERT INTO public.variants (name,color,size,stock,price,cost) 
-                                            VALUES (%s,%s,%s,%s,%s,%s)
-                                        """, (nm, c, s, int(stk), float(pr), float(cst)))
-                                        st.toast(f"تمت إضافة: {nm} - {c} - {s}", icon="✅")
-                                        
-                            conn.commit()
-                            # st.rerun() # إزالة إعادة التشغيل لرؤية الرسائل المنبثقة
-                    except Exception as e:
-                        conn.rollback()
-                        st.error(f"خطأ: {e}")
+        # --- 1. Metrics & Header ---
+        try:
+            # Metrics Calculation
+            df_inv = pd.read_sql("SELECT * FROM public.variants ORDER BY name", conn)
+            
+            total_items_count = df_inv['stock'].sum() if not df_inv.empty else 0
+            total_value_cost = (df_inv['stock'] * df_inv['cost']).sum() if not df_inv.empty else 0
+            total_value_sell = (df_inv['stock'] * df_inv['price']).sum() if not df_inv.empty else 0
+            total_potential_profit = total_value_sell - total_value_cost
+            low_stock_count = df_inv[df_inv['stock'] < 5].shape[0] if not df_inv.empty else 0
+
+            # Display Metrics
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("📦 عدد القطع", f"{total_items_count}")
+            m2.metric("💰 قيمة المخزون (بيع)", f"{total_value_sell:,.0f}")
+            m3.metric("📉 نواقص (<5)", f"{low_stock_count}", delta_color="inverse")
+            m4.metric("💵 ربح متوقع", f"{total_potential_profit:,.0f}")
+            
+        except Exception as e:
+            st.error(f"خطأ في الحسابات: {e}")
+            df_inv = pd.DataFrame()
 
         st.divider()
-        try:
-            df_inv = pd.read_sql("SELECT * FROM public.variants WHERE stock > 0 ORDER BY name", conn)
-            if not df_inv.empty:
-                for p in df_inv['name'].unique():
+
+        # --- 2. Controls (Search & Add) ---
+        c_ctrl1, c_ctrl2 = st.columns([3, 1])
+        with c_ctrl1:
+            search_query = st.text_input("🔍 بحث عن صنف (الاسم، اللون، القياس)...", label_visibility="collapsed")
+        with c_ctrl2:
+            with st.popover("➕ إضافة صنف جديد", use_container_width=True):
+                with st.form("add_new_stock"):
+                    st.markdown("##### إضافة بضاعة جديدة")
+                    nm = st.text_input("اسم المنتج")
+                    cl = st.text_input("اللون")
+                    sz = st.text_input("القياس")
+                    c_f1, c_f2 = st.columns(2)
+                    stk = c_f1.number_input("العدد", 1)
+                    pr = c_f2.number_input("سعر البيع", 0.0)
+                    cst = st.number_input("سعر التكلفة", 0.0)
+                    if st.form_submit_button("حفظ", type="primary"):
+                        try:
+                            with conn.cursor() as cur:
+                                cur.execute("INSERT INTO public.variants (name,color,size,stock,price,cost) VALUES (%s,%s,%s,%s,%s,%s)", 
+                                            (nm, cl, sz, int(stk), float(pr), float(cst)))
+                                conn.commit()
+                                st.toast("تم الحفظ بنجاح", icon="✅")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"خطأ: {e}")
+
+        # --- 3. Filter Logic ---
+        if not df_inv.empty:
+            filtered_df = df_inv.copy()
+            if search_query:
+                mask = (
+                    filtered_df['name'].str.contains(search_query, case=False) | 
+                    filtered_df['color'].str.contains(search_query, case=False) |
+                    filtered_df['size'].str.contains(search_query, case=False)
+                )
+                filtered_df = filtered_df[mask]
+            
+            # --- 4. View Mode Selection ---
+            view_mode = st.radio("طريقة العرض", ["كروت 🆔", "جدول 📄"], horizontal=True, label_visibility="collapsed")
+
+            if view_mode == "جدول 📄":
+                st.dataframe(
+                    filtered_df[['name', 'color', 'size', 'stock', 'price', 'cost']],
+                    column_config={
+                        "name": "الاسم",
+                        "color": "اللون",
+                        "size": "القياس",
+                        "stock": st.column_config.NumberColumn("العدد", help="الكمية المتوفرة"),
+                        "price": st.column_config.NumberColumn("سعر البيع", format="%d د.ع"),
+                        "cost": st.column_config.NumberColumn("التكلفة", format="%d د.ع"),
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                # Card View
+                # Group by Name only
+                unique_names = filtered_df['name'].unique()
+                for p_name in unique_names:
+                    p_group = filtered_df[filtered_df['name'] == p_name]
+                    
+                    # Calculate Product-Level Stats
+                    total_stock_for_product = p_group['stock'].sum()
+                    total_value_for_product = (p_group['stock'] * p_group['price']).sum()
+                    
                     with st.container(border=True):
-                        pdf = df_inv[df_inv['name']==p]
-                        st.markdown(f"#### 👗 {p}")
-                        for c in pdf['color'].unique():
-                            szs = " | ".join([f"{r['size']} ({r['stock']})" for _,r in pdf[pdf['color']==c].iterrows()])
-                            st.markdown(f"🎨 {c}: {szs}")
-                        with st.expander("تعديل"):
-                            for _,r in pdf.iterrows():
-                                if st.button(f"{r['color']} {r['size']}", key=f"bx{r['id']}"): edit_stock_dialog(r['id'], r['name'], r['color'], r['size'], r['cost'], r['price'], r['stock'])
-        except: st.info("المخزون فارغ")
+                        # Header Row: Name + Stats
+                        c_h1, c_h2, c_h3 = st.columns([2, 1, 1])
+                        c_h1.markdown(f"#### 👗 {p_name}")
+                        c_h2.markdown(f"**📦 العدد الكلي:** {total_stock_for_product}")
+                        c_h3.markdown(f"**💰 القيمة الكلية:** {total_value_for_product:,.0f}")
+                        
+                        st.markdown("---")
+                        
+                        # Body: Group by Color
+                        unique_colors = p_group['color'].unique()
+                        for color in unique_colors:
+                            c_group = p_group[p_group['color'] == color]
+                            
+                            # Row for each color
+                            r1, r2 = st.columns([1, 4])
+                            with r1:
+                                st.markdown(f"##### 🎨 {color}")
+                            
+                            with r2:
+                                # Items as Chips
+                                # We'll use a flex container for the chips
+                                chips_html = '<div style="display: flex; gap: 8px; flex-wrap: wrap;">'
+                                for _, row in c_group.iterrows():
+                                    # Determine chip color based on stock
+                                    bg_color = "#2C2C2E" # Default dark
+                                    border_color = "#3A3A3C"
+                                    text_color = "#FFFFFF"
+                                    
+                                    if row['stock'] == 0:
+                                        border_color = "#FF453A" # Red
+                                        bg_color = "rgba(255, 69, 58, 0.1)"
+                                    elif row['stock'] < 5:
+                                        border_color = "#FF9F0A" # Orange
+                                        bg_color = "rgba(255, 159, 10, 0.1)"
+                                    else:
+                                        border_color = "#30D158" # Green
+                                        bg_color = "rgba(48, 209, 88, 0.1)"
+
+                                    chips_html += f"""
+                                    <div style="
+                                        border: 1px solid {border_color}; 
+                                        background-color: {bg_color}; 
+                                        padding: 5px 12px; 
+                                        border-radius: 20px; 
+                                        font-size: 0.9em; 
+                                        display: flex; 
+                                        align-items: center; 
+                                        gap: 5px;">
+                                        <span style="font-weight: bold;">{row['size']}</span>
+                                        <span style="font-size: 0.8em; opacity: 0.8;">| {row['stock']} قطعة</span>
+                                    </div>
+                                    """
+                                chips_html += "</div>"
+                                st.markdown(chips_html, unsafe_allow_html=True)
+                            
+                            # Edit Buttons (Collapsible for cleaner look)
+                            with st.expander(f"تعديل {p_name} - {color}"):
+                                cols = st.columns(4)
+                                for idx, (_, row) in enumerate(c_group.iterrows()):
+                                    with cols[idx % 4]:
+                                        if st.button(f"✏️ {row['size']}", key=f"ed_{row['id']}"):
+                                            edit_stock_dialog(row['id'], row['name'], row['color'], row['size'], row['cost'], row['price'], row['stock'])
+
+        else:
+            st.info("المخزون فارغ، أضيفي منتجات جديدة.")
 
     # === 5. المصاريف ===
     with tabs[4]:
