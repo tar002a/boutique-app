@@ -879,20 +879,67 @@ def main_app():
             with c_best1:
                 st.subheader("🏆 أكثر القطع مبيعاً")
                 df_top_items = pd.read_sql("""
-                    SELECT product_name as "المنتج", SUM(qty) as "العدد المباع" 
-                    FROM public.sales GROUP BY product_name ORDER BY SUM(qty) DESC LIMIT 5
+                    SELECT 
+                        product_name as name, 
+                        SUM(qty) as total_qty,
+                        SUM(total) as total_sales,
+                        SUM(profit) as total_profit
+                    FROM public.sales 
+                    GROUP BY product_name 
+                    ORDER BY SUM(profit) DESC 
+                    LIMIT 10
                 """, conn)
-                if not df_top_items.empty: st.dataframe(df_top_items, use_container_width=True, hide_index=True)
+                
+                if not df_top_items.empty: 
+                    st.dataframe(
+                        df_top_items,
+                        column_config={
+                            "name": "المنتج",
+                            "total_qty": st.column_config.NumberColumn("العدد", help="عدد القطع المباعة"),
+                            "total_sales": st.column_config.NumberColumn("المبيعات", format="%d د.ع"),
+                            "total_profit": st.column_config.ProgressColumn(
+                                "الربح", 
+                                help="مجموع الربح من هذا المنتج",
+                                format="%d د.ع",
+                                min_value=0,
+                                max_value=int(df_top_items['total_profit'].max()),
+                            ),
+                        },
+                        use_container_width=True, 
+                        hide_index=True
+                    )
                 else: st.info("لا توجد بيانات كافية")
                     
             with c_best2:
                 st.subheader("🌟 أفضل الزبائن")
                 df_top_cust = pd.read_sql("""
-                    SELECT c.name as "العميل", SUM(s.total) as "مجموع الشراء"
-                    FROM public.sales s JOIN public.customers c ON s.customer_id = c.id
-                    GROUP BY c.name ORDER BY SUM(s.total) DESC LIMIT 5
+                    SELECT 
+                        c.name as name, 
+                        COUNT(s.id) as orders_count,
+                        SUM(s.total) as total_spend
+                    FROM public.sales s 
+                    JOIN public.customers c ON s.customer_id = c.id
+                    GROUP BY c.name 
+                    ORDER BY SUM(s.total) DESC 
+                    LIMIT 10
                 """, conn)
-                if not df_top_cust.empty: st.dataframe(df_top_cust, use_container_width=True, hide_index=True)
+                
+                if not df_top_cust.empty: 
+                    st.dataframe(
+                        df_top_cust,
+                        column_config={
+                            "name": "العميل",
+                            "orders_count": st.column_config.NumberColumn("عدد الطلبات"),
+                            "total_spend": st.column_config.ProgressColumn(
+                                "مجموع الشراء", 
+                                format="%d د.ع",
+                                min_value=0,
+                                max_value=int(df_top_cust['total_spend'].max()),
+                            ),
+                        },
+                        use_container_width=True, 
+                        hide_index=True
+                    )
                 else: st.info("لا توجد بيانات كافية")
         except Exception as e:
             st.info("البيانات قيد التجميع...")
