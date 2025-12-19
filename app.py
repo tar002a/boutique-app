@@ -3,12 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import psycopg2
-import webbrowser
-try:
-    import pyperclip
-    CLIPBOARD_AVAILABLE = True
-except ImportError:
-    CLIPBOARD_AVAILABLE = False
 
 # --- إعداد الصفحة ---
 st.set_page_config(page_title="Nawaem System", layout="wide", page_icon="📊", initial_sidebar_state="collapsed")
@@ -48,8 +42,6 @@ if 'sale_success' not in st.session_state:
     st.session_state.sale_success = False
 if 'last_invoice_text' not in st.session_state:
     st.session_state.last_invoice_text = ""
-if 'last_customer_name' not in st.session_state:
-    st.session_state.last_customer_name = ""
 
 # --- 2. اتصال قاعدة البيانات (Supabase) ---
 @st.cache_resource
@@ -151,30 +143,8 @@ def main_app():
             st.balloons()
             st.markdown("### 📋 انسخ الرسالة:")
             st.code(st.session_state.last_invoice_text, language="text")
-            
-            # زر إضافي لفتح المحادثة
-            # زر إضافي لفتح المحادثة
-            if st.session_state.last_customer_name:
-                nm = st.session_state.last_customer_name
-                url = f"https://ig.me/m/{nm}"
-                
-                c_btn, c_lnk = st.columns([1, 1])
-                with c_btn:
-                    if st.button("💬 فتح المحادثة ونسخ"):
-                         try:
-                            if CLIPBOARD_AVAILABLE: 
-                                pyperclip.copy(st.session_state.last_invoice_text)
-                                st.toast("تم النسخ ✅")
-                            
-                            webbrowser.open(url)
-                            st.toast(f"جاري فتح: {nm}")
-                         except Exception as e:
-                             st.error(f"خطأ: {e}")
-                with c_lnk:
-                     st.link_button("🔗 فتح الرابط فقط", url)
-
             if st.button("🔄 طلب جديد", type="primary"):
-                st.session_state.sale_success = False; st.session_state.last_invoice_text = ""; st.session_state.last_customer_name = ""; st.rerun()
+                st.session_state.sale_success = False; st.session_state.last_invoice_text = ""; st.rerun()
         else:
             with st.container(border=True):
                 try:
@@ -227,7 +197,7 @@ def main_app():
                             cust_id_val = int(curr_custs[curr_custs['name'] == cust_name_val]['id'].iloc[0])
                         else: st.warning("لا يوجد")
                     else:
-                        c_n = st.text_input("الاسم (يوزر انستغرام)")
+                        c_n = st.text_input("الاسم")
                         c_p = st.text_input("الهاتف")
                         c_a = st.text_input("العنوان")
                         cust_name_val = c_n
@@ -265,23 +235,6 @@ def main_app():
                             st.session_state.cart = []
                             st.session_state.sale_success = True
                             st.session_state.last_invoice_text = invoice_msg
-                            st.session_state.last_customer_name = cust_name_val
-                            
-                            # --- نسخ تلقائي وفتح انستغرام ---
-                            if CLIPBOARD_AVAILABLE:
-                                try:
-                                    pyperclip.copy(invoice_msg)
-                                    st.toast("تم نسخ الفاتورة 📋", icon="✅")
-                                except Exception as ex_clip:
-                                    print(f"Clipboard error: {ex_clip}")
-                            else:
-                                st.warning("مكتبة النسخ غير مثبتة (pyperclip)")
-                            
-                            
-                            try:
-                                webbrowser.open(f"https://ig.me/m/{cust_name_val}")
-                            except: pass
-
                             st.rerun()
                     except Exception as e:
                         conn.rollback()
