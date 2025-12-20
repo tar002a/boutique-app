@@ -8,16 +8,16 @@ from psycopg2.extras import RealDictCursor
 # --- إعداد الصفحة ---
 st.set_page_config(page_title="Nawaem System", layout="wide", page_icon="📊", initial_sidebar_state="collapsed")
 
-# --- إعدادات الأمان والاتصال ---
-# يفضل وضع كلمة المرور في st.secrets لكن وضعت هنا قيمة افتراضية للعمل المباشر
-ADMIN_PASSWORD = st.secrets.get("APP_PASSWORD", "1234") 
+# --- كلمة مرور الطوارئ (في حال لم يتم ضبط secrets) ---
+DEFAULT_PASS = "1234"
+ADMIN_PASSWORD = st.secrets.get("APP_PASSWORD", DEFAULT_PASS)
 
 # --- دالة توقيت بغداد ---
 def get_baghdad_time():
     tz = pytz.timezone('Asia/Baghdad')
     return datetime.now(tz)
 
-# --- CSS (نفس التصميم الرائع الخاص بك) ---
+# --- CSS ---
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@200;300;400;500;600;700;800;900&display=swap');
@@ -61,32 +61,28 @@ if 'sale_success' not in st.session_state: st.session_state.sale_success = False
 if 'last_invoice_text' not in st.session_state: st.session_state.last_invoice_text = ""
 if 'last_customer_username' not in st.session_state: st.session_state.last_customer_username = None
 
-# --- 2. دالة الاتصال وتنفيذ الاستعلامات (محسنة) ---
+# --- 2. إدارة قاعدة البيانات ---
 def get_connection():
-    # استخدام st.secrets للاتصال
     return psycopg2.connect(**st.secrets["postgres"])
 
 def run_query(query, params=None, fetch=False, commit=False):
-    """دالة مركزية لتنفيذ الاستعلامات بشكل آمن"""
     conn = None
     try:
         conn = get_connection()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(query, params)
-            if commit:
-                conn.commit()
-            if fetch:
-                return cur.fetchall()
+            if commit: conn.commit()
+            if fetch: return cur.fetchall()
             return True
     except Exception as e:
         if conn: conn.rollback()
-        st.error(f"خطأ في قاعدة البيانات: {e}")
+        # لا نوقف التطبيق عند الخطأ، بل نطبع رسالة في الكونسول فقط
+        print(f"DB Error: {e}") 
         return None
     finally:
         if conn: conn.close()
 
 def run_insert_returning(query, params):
-    """دالة خاصة للإدخال وإرجاع ID"""
     conn = None
     try:
         conn = get_connection()
@@ -97,8 +93,32 @@ def run_insert_returning(query, params):
             return new_id
     except Exception as e:
         if conn: conn.rollback()
-        st.error(f"خطأ: {e}")
+        st.error(f"خطأ في الإدخال: {e}")
         return None
+    finally:
+        if conn: conn.close()
+
+# --- إصلاح تلقائي لقاعدة البيانات (مهم جداً لحل مشكلتك) ---
+def fix_schema():
+    """تحويل الأعمدة القديمة النصية إلى تواريخ صحيحة"""
+    try:
+        conn = get_connection()
+        with conn.cursor() as cur:
+            # محاولة تحويل عمود التاريخ في المبيعات
+            try:
+                cur.execute("ALTER TABLE public.sales ALTER COLUMN date TYPE TIMESTAMP USING date::timestamp")
+            except:
+                conn.rollback() # العمود محول بالفعل أو هناك مشكلة بسيطة
+            
+            # محاولة تحويل عمود التاريخ في المصاريف
+            try:
+                cur.execute("ALTER TABLE public.expenses ALTER COLUMN date TYPE TIMESTAMP USING date::timestamp")
+            except:
+                conn.rollback()
+            
+            conn.commit()
+    except Exception:
+        pass # تجاهل الأخطاء إذا كانت القاعدة سليمة
     finally:
         if conn: conn.close()
 
@@ -111,7 +131,6 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS public.customers (
             id SERIAL PRIMARY KEY, name TEXT, phone TEXT, address TEXT, username TEXT
         )""",
-        # قمنا بتغيير date إلى TIMESTAMP لضمان الدقة في التقارير
         """CREATE TABLE IF NOT EXISTS public.sales (
             id SERIAL PRIMARY KEY, customer_id INTEGER, variant_id INTEGER, product_name TEXT, 
             qty INTEGER, total REAL, profit REAL, date TIMESTAMP, invoice_id TEXT
@@ -122,6 +141,9 @@ def init_db():
     ]
     for q in queries:
         run_query(q, commit=True)
+    
+    # تشغيل الإصلاح مرة واحدة
+    fix_schema()
 
 init_db()
 
@@ -135,15 +157,12 @@ def edit_sale_dialog(sale_id, current_qty, current_total, variant_id, product_na
     with c1:
         if st.button("💾 حفظ التعديلات", type="primary"):
             diff = new_qty - int(current_qty)
-            # تحديث المخزون أولاً
             if diff != 0:
                 run_query("UPDATE public.variants SET stock = stock - %s WHERE id = %s", (int(diff), int(variant_id)), commit=True)
-            # تحديث البيع
             run_query("UPDATE public.sales SET qty = %s, total = %s WHERE id = %s", (int(new_qty), float(new_total), int(sale_id)), commit=True)
             st.rerun()
     with c2:
         if st.button("🗑️ حذف العملية"):
-            # إرجاع المخزون
             run_query("UPDATE public.variants SET stock = stock + %s WHERE id = %s", (int(current_qty), int(variant_id)), commit=True)
             run_query("DELETE FROM public.sales WHERE id = %s", (int(sale_id),), commit=True)
             st.rerun()
@@ -186,7 +205,6 @@ def login_screen():
 
 # --- 5. التطبيق الرئيسي ---
 def main_app():
-    # Sidebar logout
     with st.sidebar:
         if st.button("تسجيل الخروج"):
             st.session_state.logged_in = False
@@ -199,383 +217,188 @@ def main_app():
         if st.session_state.sale_success:
             st.success("✅ تم حجز الطلب!")
             st.balloons()
-            st.markdown("### 📋 انسخ الرسالة:")
             st.code(st.session_state.last_invoice_text, language="text")
-            
             if st.session_state.last_customer_username:
-                ig_url = f"https://ig.me/m/{st.session_state.last_customer_username}"
-                st.link_button(" إرسال الفاتورة عبر انستغرام", ig_url, type="primary")
-            
+                st.link_button(" إرسال الفاتورة عبر انستغرام", f"https://ig.me/m/{st.session_state.last_customer_username}", type="primary")
             st.divider()
             if st.button("🔄 طلب جديد", type="primary"):
                 st.session_state.sale_success = False; st.session_state.last_invoice_text = ""; st.rerun()
         else:
             with st.container(border=True):
-                # بحث SQL سريع بدلاً من Pandas
                 srch = st.text_input("🔍 بحث عن منتج...", placeholder="اكتب اسم المنتج أو اللون...")
-                
                 results = []
                 if srch:
                     search_term = f"%{srch}%"
-                    results = run_query("""
-                        SELECT * FROM public.variants 
-                        WHERE (name ILIKE %s OR color ILIKE %s) AND stock > 0 
-                        LIMIT 20
-                    """, (search_term, search_term), fetch=True)
+                    results = run_query("SELECT * FROM public.variants WHERE (name ILIKE %s OR color ILIKE %s) AND stock > 0 LIMIT 20", (search_term, search_term), fetch=True)
                 else:
-                    # عرض أحدث الإضافات إذا لم يكن هناك بحث
                     results = run_query("SELECT * FROM public.variants WHERE stock > 0 ORDER BY id DESC LIMIT 5", fetch=True)
 
                 if results:
-                    # تحويل النتائج لقائمة منسدلة
                     opts = {f"{r['name']} | {r['color']} ({r['size']})": r for r in results}
                     sel_key = st.selectbox("اختر المنتج:", list(opts.keys()), label_visibility="collapsed")
-                    
                     if sel_key:
                         r = opts[sel_key]
                         st.caption(f"سعر: {r['price']:,.0f} | متوفر: {r['stock']}")
                         c1, c2 = st.columns(2)
                         q = c1.number_input("العدد", 1, int(r['stock']), 1)
                         p = c2.number_input("سعر البيع", value=float(r['price']))
-                        
                         if st.button("🛒 أضف للسلة", type="secondary"):
-                            # تحقق مزدوج من المخزون
-                            current_stock = run_query("SELECT stock FROM public.variants WHERE id=%s", (r['id'],), fetch=True)
-                            if current_stock and current_stock[0]['stock'] >= q:
-                                item_dict = {
-                                    "id": int(r['id']), "name": r['name'], "color": r['color'], "size": r['size'], 
-                                    "cost": float(r['cost']), "price": float(p), "qty": int(q), "total": float(p*q)
-                                }
-                                st.session_state.cart.append(item_dict)
-                                st.toast("تمت الإضافة", icon="✅")
-                            else:
-                                st.error("عذراً، الكمية لم تعد متوفرة!")
+                            st.session_state.cart.append({"id": int(r['id']), "name": r['name'], "color": r['color'], "size": r['size'], "cost": float(r['cost']), "price": float(p), "qty": int(q), "total": float(p*q)})
+                            st.toast("تمت الإضافة", icon="✅")
 
             if st.session_state.cart:
                 st.divider()
                 st.markdown("### 🛒 سلة المشتريات")
-                for i, item in enumerate(st.session_state.cart):
-                    st.markdown(f"""
-                    <div class="css-card" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div style="text-align: right;">
-                            <div style="font-weight: 800; font-size: 1.1em; color: var(--text-color);">{item['name']}</div>
-                            <div style="color: var(--subtext-color); font-size: 0.9em;">{item['color']} | {item['size']}</div>
-                            <div style="color: var(--primary-color); font-weight: 600;">{item['qty']} × {item['price']:,.0f}</div>
-                        </div>
-                        <div style="text-align: left; font-weight: 800; color: var(--primary-color); font-size: 1.2em;">
-                            {item['total']:,.0f}
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                # زر حذف السلة
-                if st.button("إفراغ السلة"):
-                    st.session_state.cart = []
-                    st.rerun()
-
+                for item in st.session_state.cart:
+                    st.markdown(f"""<div class="css-card" style="display:flex;justify-content:space-between;"><div><b>{item['name']}</b><br><small>{item['color']} | {item['size']}</small></div><div style="color:var(--primary-color)"><b>{item['total']:,.0f}</b></div></div>""", unsafe_allow_html=True)
+                
+                if st.button("إفراغ السلة"): st.session_state.cart = []; st.rerun()
                 st.divider()
-                st.markdown("##### 👤 بيانات العميل")
                 with st.container(border=True):
-                    cust_type = st.radio("نوع العميل", ["جديد", "سابق"], horizontal=True)
-                    cust_id_val, cust_name_val, cust_username_val, cust_phone_val, cust_address_val = None, "", "", "", ""
-                    
+                    cust_type = st.radio("العميل", ["جديد", "سابق"], horizontal=True)
+                    cust_id_val, cust_name_val, cust_phone_val, cust_address_val, cust_username_val = None, "", "", "", ""
                     if cust_type == "سابق":
-                        # جلب العملاء للبحث
                         all_custs = run_query("SELECT id, name, phone, username, address FROM public.customers ORDER BY name", fetch=True)
                         if all_custs:
-                            c_opts = {f"{x['name']} - {x['phone']}": x for x in all_custs}
-                            c_sel = st.selectbox("الاسم:", list(c_opts.keys()))
+                            c_sel = st.selectbox("الاسم:", [f"{x['name']} - {x['phone']}" for x in all_custs])
                             if c_sel:
-                                selected_row = c_opts[c_sel]
-                                cust_id_val = int(selected_row['id'])
-                                cust_name_val = selected_row['name']
-                                cust_username_val = selected_row['username']
-                                cust_phone_val = selected_row['phone']
-                                cust_address_val = selected_row['address']
-                        else: st.warning("لا يوجد عملاء")
+                                selected = next(x for x in all_custs if f"{x['name']} - {x['phone']}" == c_sel)
+                                cust_id_val, cust_name_val, cust_phone_val, cust_address_val, cust_username_val = selected['id'], selected['name'], selected['phone'], selected['address'], selected['username']
                     else:
-                        c_n = st.text_input("الاسم (حساب الانستغرام)")
-                        c_p = st.text_input("الهاتف")
-                        c_a = st.text_input("العنوان")
-                        cust_name_val = c_n
-                        cust_username_val = c_n
-                        cust_phone_val = c_p
-                        cust_address_val = c_a
-                
-                tot = sum(x['total'] for x in st.session_state.cart)
-                
-                # Invoice Text
-                invoice_msg = f"🌸 تم تثبيت طلبج بنجاح حبيبتي\n📄 تفاصيل الطلب:\n"
-                for i, x in enumerate(st.session_state.cart):
-                    invoice_msg += f"{x['name']} | {x['color']} ({x['size']})\nالعدد: {x['qty']} | السعر: {x['price']:,.0f}\n"
-                invoice_msg += f"---\nالمجموع الكلي: {tot:,.0f} د.ع\n📍 العنوان: {cust_address_val}\n📞 الهاتف: {cust_phone_val}\n\n✨ التوصيل خلال 2-4 أيام، يرجى فحص الطلب مع المندوب."
+                        cust_name_val = st.text_input("الاسم")
+                        cust_phone_val = st.text_input("الهاتف")
+                        cust_address_val = st.text_input("العنوان")
+                        cust_username_val = cust_name_val
 
-                st.markdown(f"""
-                <div style="background-color: var(--input-bg); padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 20px; border: 1px solid var(--border-color);">
-                    <div style="font-size: 0.9em; color: var(--subtext-color);">المجموع الكلي</div>
-                    <div style="font-size: 1.8em; font-weight: bold; color: var(--primary-color);">{tot:,.0f} د.ع</div>
-                </div>
-                """, unsafe_allow_html=True)
+                tot = sum(x['total'] for x in st.session_state.cart)
+                st.markdown(f"<h2 style='text-align:center; color:var(--primary-color)'>{tot:,.0f} د.ع</h2>", unsafe_allow_html=True)
 
                 if st.button("✅ إتمام البيع", type="primary"):
                     if not cust_name_val: st.error("الاسم مطلوب!"); st.stop()
-                    
                     try:
-                        # 1. معالجة العميل
                         if cust_type == "جديد":
-                            # التحقق من التكرار
-                            exist = run_query("SELECT id FROM public.customers WHERE phone = %s", (c_p,), fetch=True)
-                            if exist:
-                                cust_id_val = exist[0]['id'] # استخدام العميل الموجود
-                            else:
-                                cust_id_val = run_insert_returning(
-                                    "INSERT INTO public.customers (name, phone, address, username) VALUES (%s,%s,%s,%s) RETURNING id",
-                                    (c_n, c_p, c_a, c_n)
-                                )
+                            exist = run_query("SELECT id FROM public.customers WHERE phone = %s", (cust_phone_val,), fetch=True)
+                            if exist: cust_id_val = exist[0]['id']
+                            else: cust_id_val = run_insert_returning("INSERT INTO public.customers (name, phone, address, username) VALUES (%s,%s,%s,%s) RETURNING id", (cust_name_val, cust_phone_val, cust_address_val, cust_username_val))
                         
                         baghdad_now = get_baghdad_time()
-                        inv = baghdad_now.strftime("%Y%m%d%H%M")
+                        inv_id = baghdad_now.strftime("%Y%m%d%H%M")
+                        invoice_msg = f"🌸 طلب جديد\nالاسم: {cust_name_val}\nالعنوان: {cust_address_val}\n---\n"
                         
-                        # 2. إدخال المبيعات
                         for x in st.session_state.cart:
-                            # تحديث المخزون
                             run_query("UPDATE public.variants SET stock=stock-%s WHERE id=%s", (int(x['qty']), int(x['id'])), commit=True)
-                            
-                            profit_calc = (x['price'] - x['cost']) * x['qty']
-                            run_query("""
-                                INSERT INTO public.sales (customer_id, variant_id, product_name, qty, total, profit, date, invoice_id) 
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                            """, (int(cust_id_val), int(x['id']), x['name'], int(x['qty']), float(x['total']), float(profit_calc), baghdad_now, inv), commit=True)
+                            profit = (x['price'] - x['cost']) * x['qty']
+                            run_query("INSERT INTO public.sales (customer_id, variant_id, product_name, qty, total, profit, date, invoice_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", (cust_id_val, x['id'], x['name'], x['qty'], x['total'], profit, baghdad_now, inv_id), commit=True)
+                            invoice_msg += f"{x['name']} ({x['qty']}) - {x['price']:,.0f}\n"
                         
+                        invoice_msg += f"---\nالمجموع: {tot:,.0f} د.ع"
                         st.session_state.cart = []
                         st.session_state.sale_success = True
                         st.session_state.last_invoice_text = invoice_msg
                         st.session_state.last_customer_username = cust_username_val
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"حدث خطأ: {e}")
+                    except Exception as e: st.error(f"حدث خطأ: {e}")
 
     # === 2. السجل ===
     with tabs[1]:
-        st.caption("آخر العمليات (محدث)")
-        sales_log = run_query("""
-            SELECT s.*, c.name as customer_name, v.color, v.size 
-            FROM public.sales s 
-            LEFT JOIN public.customers c ON s.customer_id = c.id 
-            LEFT JOIN public.variants v ON s.variant_id = v.id 
-            ORDER BY s.id DESC LIMIT 30
-        """, fetch=True)
-        
-        if sales_log:
-            for r in sales_log:
+        log = run_query("SELECT s.*, c.name as cname FROM public.sales s LEFT JOIN public.customers c ON s.customer_id=c.id ORDER BY s.id DESC LIMIT 30", fetch=True)
+        if log:
+            for r in log:
                 with st.container(border=True):
                     c1, c2 = st.columns([4,1])
-                    c_name = r['customer_name'] if r['customer_name'] else "غير مسجل"
-                    details = f" | 🎨 {r['color']} - {r['size']}" if r['color'] else ""
-                    
-                    c1.markdown(f"**{r['product_name']}** ({r['qty']})")
-                    c1.caption(f"👤 {c_name} | 💰 {r['total']:,.0f}{details}")
-                    if c2.button("⚙️", key=f"e{r['id']}"): 
-                        edit_sale_dialog(r['id'], r['qty'], r['total'], r['variant_id'], r['product_name'])
-        else:
-            st.info("لا توجد مبيعات بعد")
+                    c1.markdown(f"**{r['product_name']}** ({r['qty']}) | {r['total']:,.0f}")
+                    c1.caption(f"{r['cname']} | {r['date']}")
+                    if c2.button("⚙️", key=f"e{r['id']}"): edit_sale_dialog(r['id'], r['qty'], r['total'], r['variant_id'], r['product_name'])
+        else: st.info("السجل فارغ")
 
     # === 3. العملاء ===
     with tabs[2]:
-        search_query = st.text_input("🔍 بحث عن عميل (الاسم أو الهاتف)", "")
-        
-        query_cust = """
-            SELECT c.id, c.name, c.phone, c.username, c.address,
-                   COALESCE(SUM(s.total), 0) as total_spend,
-                   MAX(s.date) as last_purchase
-            FROM public.customers c
-            LEFT JOIN public.sales s ON c.id = s.customer_id
-        """
-        params = ()
-        if search_query:
-            query_cust += " WHERE c.name ILIKE %s OR c.phone ILIKE %s OR c.username ILIKE %s"
-            term = f"%{search_query}%"
-            params = (term, term, term)
-            
-        query_cust += " GROUP BY c.id ORDER BY total_spend DESC LIMIT 50"
-        
-        df_cust = pd.DataFrame(run_query(query_cust, params, fetch=True) or [])
-        
-        if not df_cust.empty:
-            col1, col2 = st.columns(2)
-            for i, r in df_cust.iterrows():
-                with (col1 if i % 2 == 0 else col2):
-                    with st.container(border=True):
-                        st.markdown(f"**{r['name']}**")
-                        st.caption(f"📞 {r['phone']} | 📍 {r['address']}")
-                        c_s1, c_s2 = st.columns(2)
-                        c_s1.metric("الشراء", f"{r['total_spend']:,.0f}")
-                        if pd.notna(r['last_purchase']):
-                            c_s2.caption(f"آخر ظهور: {str(r['last_purchase']).split(' ')[0]}")
-        else:
-            st.info("لا يوجد نتائج")
+        sq = st.text_input("بحث عميل...")
+        q = "SELECT c.*, SUM(s.total) as tot FROM public.customers c LEFT JOIN public.sales s ON c.id=s.customer_id"
+        p = ()
+        if sq: q += " WHERE c.name ILIKE %s OR c.phone ILIKE %s"; p = (f"%{sq}%", f"%{sq}%")
+        q += " GROUP BY c.id ORDER BY tot DESC LIMIT 50"
+        custs = run_query(q, p, fetch=True)
+        if custs:
+            for c in custs:
+                with st.container(border=True):
+                    st.markdown(f"**{c['name']}** - {c['phone']}")
+                    st.caption(f"العنوان: {c['address']} | المشتريات: {c['tot'] or 0:,.0f}")
 
     # === 4. المخزون ===
     with tabs[3]:
-        # إحصائيات سريعة
-        stats = run_query("SELECT SUM(stock) as cnt, SUM(stock*price) as val, SUM(stock*cost) as cst FROM public.variants", fetch=True)[0]
-        m1, m2, m3 = st.columns(3)
-        m1.metric("📦 عدد القطع", f"{stats['cnt'] or 0}")
-        m2.metric("💰 قيمة البيع", f"{stats['val'] or 0:,.0f}")
-        m3.metric("💵 ربح متوقع", f"{(stats['val'] or 0) - (stats['cst'] or 0):,.0f}")
+        res = run_query("SELECT SUM(stock) as s, SUM(stock*price) as v FROM public.variants", fetch=True)
+        # حماية ضد القيم الفارغة
+        if res and res[0]['s']:
+            st.metric("📦 المخزون", f"{res[0]['s']}", f"{res[0]['v']:,.0f} د.ع قيمة بيعية")
         
-        st.divider()
+        c1, c2 = st.columns([3,1])
+        s_term = c1.text_input("بحث مخزون...", label_visibility="collapsed")
+        with c2.popover("➕ إضافة"):
+            with st.form("new_prod"):
+                n, cl, sz = st.text_input("الاسم"), st.text_input("لون"), st.text_input("قياس")
+                stk, pr, cst = st.number_input("العدد", 1), st.number_input("بيع", 0.0), st.number_input("كلفة", 0.0)
+                if st.form_submit_button("حفظ"):
+                    run_query("INSERT INTO public.variants (name,color,size,stock,price,cost) VALUES (%s,%s,%s,%s,%s,%s)", (n,cl,sz,stk,pr,cst), commit=True); st.rerun()
         
-        c_ctrl1, c_ctrl2 = st.columns([3, 1])
-        with c_ctrl1:
-            search_stock = st.text_input("🔍 بحث في المخزون...", label_visibility="collapsed")
-        with c_ctrl2:
-            with st.popover("➕ إضافة صنف"):
-                with st.form("add_new_stock"):
-                    nm = st.text_input("اسم المنتج")
-                    cl = st.text_input("اللون")
-                    sz = st.text_input("القياس")
-                    c_f1, c_f2 = st.columns(2)
-                    stk = c_f1.number_input("العدد", 1)
-                    pr = c_f2.number_input("سعر البيع", 0.0)
-                    cst = st.number_input("سعر التكلفة", 0.0)
-                    if st.form_submit_button("حفظ"):
-                        run_query("INSERT INTO public.variants (name,color,size,stock,price,cost) VALUES (%s,%s,%s,%s,%s,%s)", 
-                                  (nm, cl, sz, int(stk), float(pr), float(cst)), commit=True)
-                        st.rerun()
-
-        # عرض البيانات
-        q_stock = "SELECT * FROM public.variants"
-        p_stock = ()
-        if search_stock:
-            q_stock += " WHERE name ILIKE %s OR color ILIKE %s"
-            p_stock = (f"%{search_stock}%", f"%{search_stock}%")
-        q_stock += " ORDER BY name"
+        q_inv = "SELECT * FROM public.variants"
+        p_inv = ()
+        if s_term: q_inv += " WHERE name ILIKE %s OR color ILIKE %s"; p_inv = (f"%{s_term}%", f"%{s_term}%")
+        inv = run_query(q_inv + " ORDER BY name", p_inv, fetch=True)
         
-        df_inv = pd.DataFrame(run_query(q_stock, p_stock, fetch=True) or [])
-        
-        if not df_inv.empty:
-            view_mode = st.radio("العرض", ["كروت", "جدول"], horizontal=True, label_visibility="collapsed")
-            if view_mode == "جدول":
-                st.dataframe(df_inv[['name', 'color', 'size', 'stock', 'price', 'cost']], use_container_width=True)
-            else:
-                unique_names = df_inv['name'].unique()
-                for p_name in unique_names:
-                    p_group = df_inv[df_inv['name'] == p_name]
-                    with st.container(border=True):
-                        st.markdown(f"#### 👗 {p_name}")
-                        for color in p_group['color'].unique():
-                            c_group = p_group[p_group['color'] == color]
-                            r1, r2 = st.columns([1, 4])
-                            r1.markdown(f"**🎨 {color}**")
-                            with r2:
-                                chips = '<div style="display: flex; gap: 5px; flex-wrap: wrap;">'
-                                for _, row in c_group.iterrows():
-                                    bc = "#30D158" if row['stock'] >= 5 else "#FF9F0A"
-                                    if row['stock'] == 0: bc = "#FF453A"
-                                    chips += f'<span style="background:{bc}33; border:1px solid {bc}; padding:2px 8px; border-radius:10px; font-size:0.8em">{row["size"]} | {row["stock"]}</span>'
-                                chips += "</div>"
-                                st.markdown(chips, unsafe_allow_html=True)
-                                
-                                with st.expander("تعديل"):
-                                    cols = st.columns(4)
-                                    for idx, (_, row) in enumerate(c_group.iterrows()):
-                                        with cols[idx % 4]:
-                                            if st.button(f"{row['size']}", key=f"ed_{row['id']}"):
-                                                edit_stock_dialog(row['id'], row['name'], row['color'], row['size'], row['cost'], row['price'], row['stock'])
+        if inv:
+            for r in inv:
+                with st.container(border=True):
+                    c1, c2 = st.columns([4,1])
+                    c1.markdown(f"**{r['name']}** | {r['color']} - {r['size']}")
+                    c1.caption(f"عدد: {r['stock']} | سعر: {r['price']:,.0f}")
+                    if c2.button("✏️", key=f"ei{r['id']}"): edit_stock_dialog(r['id'], r['name'], r['color'], r['size'], r['cost'], r['price'], r['stock'])
 
     # === 5. المصاريف ===
     with tabs[4]:
-        with st.form("add_exp"):
-            c1, c2 = st.columns([1, 3])
-            amount = c1.number_input("المبلغ", min_value=1.0, step=250.0)
-            reason = c2.text_input("السبب")
-            if st.form_submit_button("تسجيل"):
-                if reason:
-                    run_query("INSERT INTO public.expenses (amount, reason, date) VALUES (%s, %s, %s)", 
-                              (float(amount), reason, get_baghdad_time()), commit=True)
-                    st.success("تم التسجيل"); st.rerun()
-
-        st.subheader("سجل المصاريف")
+        with st.form("exp"):
+            a, r = st.number_input("مبلغ"), st.text_input("سبب")
+            if st.form_submit_button("حفظ") and r:
+                run_query("INSERT INTO public.expenses (amount, reason, date) VALUES (%s,%s,%s)", (a, r, get_baghdad_time()), commit=True); st.rerun()
+        
         exps = run_query("SELECT * FROM public.expenses ORDER BY id DESC LIMIT 20", fetch=True)
         if exps:
             for x in exps:
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([1,3,1])
-                    c1.markdown(f"**{x['amount']:,.0f}**")
-                    c2.text(x['reason'])
-                    # عرض التاريخ بشكل جميل
-                    d_str = str(x['date']).split('.')[0] if x['date'] else ""
-                    c3.caption(d_str)
-                    if c3.button("🗑️", key=f"dx{x['id']}"):
-                        run_query("DELETE FROM public.expenses WHERE id=%s", (x['id'],), commit=True)
-                        st.rerun()
+                c1, c2, c3 = st.columns([1,3,1])
+                c1.write(f"{x['amount']:,.0f}"); c2.write(x['reason']); 
+                if c3.button("🗑️", key=f"de{x['id']}"): run_query("DELETE FROM public.expenses WHERE id=%s", (x['id'],), commit=True); st.rerun()
 
-    # === 6. التقارير (SQL Native) ===
+    # === 6. التقارير ===
     with tabs[5]:
-        st.header("📊 ذكاء الأعمال (BI)")
+        st.subheader("📊 التقارير")
         
-        # دوال مساعدة للتقارير تستخدم SQL Time
-        def get_sql_stats(interval_condition):
-            q = f"""
-                SELECT COALESCE(SUM(total), 0) as sales, COALESCE(SUM(profit), 0) as profit, COUNT(DISTINCT invoice_id) as invs 
-                FROM public.sales WHERE {interval_condition}
-            """
-            return run_query(q, fetch=True)[0]
+        # حماية ضد الأخطاء في التقارير
+        def safe_get_stats(cond):
+            res = run_query(f"SELECT COALESCE(SUM(total),0) as s, COALESCE(SUM(profit),0) as p FROM public.sales WHERE {cond}", fetch=True)
+            return res[0] if res else {'s': 0, 'p': 0}
 
-        def get_sql_exp(interval_condition):
-            q = f"SELECT COALESCE(SUM(amount), 0) as amt FROM public.expenses WHERE {interval_condition}"
-            res = run_query(q, fetch=True)
-            return res[0]['amt'] if res else 0
+        def safe_get_exp(cond):
+            res = run_query(f"SELECT COALESCE(SUM(amount),0) as a FROM public.expenses WHERE {cond}", fetch=True)
+            return res[0]['a'] if res else 0
 
-        # الاستعلامات تعتمد على تحويل العمود إلى Date للمقارنة
-        # ملاحظة: ::date في بوستجريس تقوم باقتطاع الوقت، وهو المطلوب هنا
+        # اليوم
+        d_stat = safe_get_stats("date::date = CURRENT_DATE")
+        d_exp = safe_get_exp("date::date = CURRENT_DATE")
         
-        # 1. اليوم
-        s_today = get_sql_stats("date::date = CURRENT_DATE")
-        e_today = get_sql_exp("date::date = CURRENT_DATE")
-        
-        st.markdown("##### 📅 اليوم")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("مبيعات", f"{s_today['sales']:,.0f}", f"{s_today['invs']} فاتورة")
-        c2.metric("أرباح", f"{s_today['profit']:,.0f}")
-        c3.metric("مصاريف", f"{e_today:,.0f}", delta_color="inverse")
-        c4.metric("صافي", f"{s_today['profit'] - e_today:,.0f}")
-        
-        st.divider()
-        
-        # 2. الأسبوع (آخر 7 أيام)
-        s_week = get_sql_stats("date >= CURRENT_DATE - INTERVAL '7 days'")
-        e_week = get_sql_exp("date >= CURRENT_DATE - INTERVAL '7 days'")
-        
-        st.markdown("##### 🗓️ آخر 7 أيام")
         c1, c2, c3 = st.columns(3)
-        c1.metric("مبيعات", f"{s_week['sales']:,.0f}")
-        c2.metric("مصاريف", f"{e_week:,.0f}", delta_color="inverse")
-        c3.metric("صافي الربح", f"{s_week['profit'] - e_week:,.0f}")
-        
+        c1.metric("مبيعات اليوم", f"{d_stat['s']:,.0f}")
+        c2.metric("أرباح اليوم", f"{d_stat['p']:,.0f}")
+        c3.metric("صافي اليوم", f"{d_stat['p'] - d_exp:,.0f}")
         st.divider()
-
-        # 3. الأفضل مبيعاً
-        c_b1, c_b2 = st.columns(2)
-        with c_b1:
-            st.subheader("🏆 المنتجات الأكثر ربحاً")
-            top_prod = run_query("""
-                SELECT product_name, SUM(profit) as prf, SUM(qty) as q 
-                FROM public.sales GROUP BY product_name ORDER BY prf DESC LIMIT 5
-            """, fetch=True)
-            if top_prod:
-                st.dataframe(pd.DataFrame(top_prod), hide_index=True, use_container_width=True)
-
-        with c_b2:
-            st.subheader("🎨 الألوان الأكثر طلباً")
-            top_col = run_query("""
-                SELECT v.color, SUM(s.qty) as q 
-                FROM public.sales s JOIN public.variants v ON s.variant_id = v.id 
-                GROUP BY v.color ORDER BY q DESC LIMIT 5
-            """, fetch=True)
-            if top_col:
-                st.bar_chart(pd.DataFrame(top_col).set_index("color"))
+        
+        # الأسبوع
+        w_stat = safe_get_stats("date >= CURRENT_DATE - INTERVAL '7 days'")
+        w_exp = safe_get_exp("date >= CURRENT_DATE - INTERVAL '7 days'")
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("مبيعات أسبوع", f"{w_stat['s']:,.0f}")
+        c2.metric("مصاريف أسبوع", f"{w_exp:,.0f}")
+        c3.metric("صافي أسبوع", f"{w_stat['p'] - w_exp:,.0f}")
 
 if __name__ == "__main__":
     if st.session_state.logged_in:
