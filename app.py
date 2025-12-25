@@ -149,12 +149,18 @@ def init_db():
             # تم تعديل date إلى TIMESTAMP
             c.execute("""CREATE TABLE IF NOT EXISTS public.sales (
                 id SERIAL PRIMARY KEY, customer_id INTEGER, variant_id INTEGER, product_name TEXT, 
-                qty INTEGER, total REAL, profit REAL, date TIMESTAMP, invoice_id TEXT
+                qty INTEGER, total REAL, profit REAL, date TIMESTAMP, invoice_id TEXT, delivery_duration TEXT
             )""")
             # تم تعديل date إلى TIMESTAMP
             c.execute("""CREATE TABLE IF NOT EXISTS public.expenses (
                 id SERIAL PRIMARY KEY, amount REAL, reason TEXT, date TIMESTAMP
             )""")
+            
+            # التحقق من وجود column 'delivery_duration' وإضافته إذا لم يكن موجوداً
+            c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='sales' AND column_name='delivery_duration'")
+            if not c.fetchone():
+                c.execute("ALTER TABLE public.sales ADD COLUMN delivery_duration TEXT")
+                
             conn.commit()
     except Exception as e:
         conn.rollback()
@@ -377,7 +383,12 @@ def main_app():
                         cust_phone_val = c_p
                         cust_address_val = c_a
                 
+
                 tot = sum(x['total'] for x in st.session_state.cart)
+                
+                # --- خيار مدة التوصيل ---
+                delivery_options = ["24 ساعة", "48 ساعة", "3 ايام", "4 ايام", "5 ايام", "6 ايام", "7 ايام"]
+                delivery_duration = st.selectbox("مدة التوصيل", delivery_options, index=1) # Default to 48 hours
                 
                 invoice_msg = "🌸 تم تثبيت طلبج بنجاح حبيبتي\n📄 تفاصيل الطلب:\n"
                 for i, x in enumerate(st.session_state.cart):
@@ -394,7 +405,7 @@ def main_app():
                 invoice_msg += f"العنوان: {cust_address_val}\n"
                 invoice_msg += f"الرقم: {cust_phone_val}\n"
                 invoice_msg += f"✨ ملاحظة مهمة: من يوصل المندوب، ضروري تفتحين الطلب وتقيسين القطعة وتتأكدين منها قبل الدفع. هذا حقج حتى تضمنين قياسج وموديلج 100%.\n"
-                invoice_msg += f"🚚 مدة التوصيل: خلال 2-4 أيام إن شاء الله. المندوب راح يتصل بيج قبل ما يوصل.\n\n"
+                invoice_msg += f"🚚 مدة التوصيل: خلال {delivery_duration} إن شاء الله. المندوب راح يتصل بيج قبل ما يوصل.\n\n"
                 invoice_msg += f"تتهنين بيها مقدماً، وشكراً لثقتج بـ نواعم بوتيك 🤍"
                 
                 st.markdown(f"""
@@ -423,9 +434,9 @@ def main_app():
                                 cur.execute("UPDATE public.variants SET stock=stock-%s WHERE id=%s", (int(x['qty']), int(x['id'])))
                                 profit_calc = (x['price'] - x['cost']) * x['qty']
                                 cur.execute("""
-                                    INSERT INTO public.sales (customer_id, variant_id, product_name, qty, total, profit, date, invoice_id) 
-                                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                                """, (int(cust_id_val), int(x['id']), x['name'], int(x['qty']), float(x['total']), float(profit_calc), baghdad_now, inv_id))
+                                    INSERT INTO public.sales (customer_id, variant_id, product_name, qty, total, profit, date, invoice_id, delivery_duration) 
+                                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                """, (int(cust_id_val), int(x['id']), x['name'], int(x['qty']), float(x['total']), float(profit_calc), baghdad_now, inv_id, delivery_duration))
                             
                             conn.commit()
                             st.toast(f"💰 تمت عملية البيع بقيمة {tot:,.0f} د.ع", icon="✅")
