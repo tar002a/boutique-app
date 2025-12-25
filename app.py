@@ -155,6 +155,13 @@ def init_db():
             c.execute("""CREATE TABLE IF NOT EXISTS public.expenses (
                 id SERIAL PRIMARY KEY, amount REAL, reason TEXT, date TIMESTAMP
             )""")
+
+            # جدول الرواجع الجديد
+            c.execute("""CREATE TABLE IF NOT EXISTS public.returns (
+                id SERIAL PRIMARY KEY, sale_id INTEGER, variant_id INTEGER, customer_id INTEGER,
+                product_name TEXT, product_details TEXT, qty INTEGER, return_amount REAL, 
+                return_date TIMESTAMP, status TEXT
+            )""")
             
             # التحقق من وجود column 'delivery_duration' وإضافته إذا لم يكن موجوداً
             c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='sales' AND column_name='delivery_duration'")
@@ -283,7 +290,7 @@ def login_screen():
 
 # --- 5. التطبيق الرئيسي ---
 def main_app():
-    tabs = st.tabs(["🛍️ بيع", "📝 سجل", "👥 عملاء", "📦 مخزن", "💸 مصاريف", "📊 تقارير"])
+    tabs = st.tabs(["🛍️ بيع", "📝 سجل", "↩️ رواجع", "👥 عملاء", "📦 مخزن", "💸 مصاريف", "📊 تقارير"])
 
     # === 1. البيع ===
     with tabs[0]:
@@ -481,11 +488,90 @@ def main_app():
                     c1.markdown(f"**{r['product_name']}** ({r['qty']})")
                     c1.caption(f"👤 {c_name} | 💰 {r['total']:,.0f}{details}")
                     c1.caption(f"📅 {date_display}")
-                    if c2.button("⚙️", key=f"e{r['id']}"): edit_sale_dialog(r['id'], r['qty'], r['total'], r['variant_id'], r['product_name'])
+                    
+                    # Buttons
+                    if c2.button("⚙️", key=f"e{r['id']}"): 
+                        edit_sale_dialog(r['id'], r['qty'], r['total'], r['variant_id'], r['product_name'])
+                    
+                    if c2.button("↩️", key=f"ret{r['id']}", help="إضافة للرواجع"):
+                        try:
+                            with conn.cursor() as cur:
+                                # Check duplicates
+                                cur.execute("SELECT id FROM public.returns WHERE sale_id=%s", (int(r['id']),))
+                                if cur.fetchone():
+                                    st.toast("⚠️ تم طلب إرجاع هذا العنصر مسبقاً", icon="⚠️")
+                                else:
+                                    cur.execute("""
+                                        INSERT INTO public.returns (
+                                            sale_id, variant_id, customer_id, product_name, 
+                                            product_details, qty, return_amount, return_date, status
+                                        )
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending')
+                                    """, (
+                                        int(r['id']), 
+                                        int(r['variant_id']) if pd.notna(r['variant_id']) else None,
+                                        int(r['customer_id']) if pd.notna(r['customer_id']) else None,
+                                        r['product_name'],
+                                        details.replace(" | ", "").strip(),
+                                        int(r['qty']),
+                                        float(r['total']),
+                                        get_baghdad_time()
+                                    ))
+                                    conn.commit()
+                                    st.toast("✅ تمت الإضافة لقائمة الرواجع", icon="↩️")
+                        except Exception as e:
+                            st.error(f"حدث خطأ: {e}")
         except: st.info("لا توجد مبيعات بعد")
 
-    # === 3. العملاء ===
+    # === 3. الرواجع ===
     with tabs[2]:
+        st.subheader("🔙 إدارة المرجوعات")
+        try:
+            # عرض الطلبات المعلقة (Pending)
+            pending_returns = pd.read_sql("SELECT * FROM public.returns WHERE status = 'Pending' ORDER BY id DESC", conn)
+            
+            if not pending_returns.empty:
+                for i, row in pending_returns.iterrows():
+                    with st.container(border=True):
+                        c1, c2 = st.columns([4, 1])
+                        
+                        # تفاصيل الطلب
+                        c1.markdown(f"**{row['product_name']}**")
+                        c1.caption(f"📝 {row['product_details']} | 🔢 العدد: {row['qty']}")
+                        c1.caption(f"💰 مبلغ الاسترجاع: {row['return_amount']:,.0f} د.ع | 🆔 فاتورة: {row['sale_id']}")
+                        
+                        # زر الاستلام
+                        if c2.button("📥 استلام للمخزن", key=f"recv_{row['id']}"):
+                            try:
+                                with conn.cursor() as cur:
+                                    # 1. تحديث المخزون (إرجاع الكمية)
+                                    if row['variant_id']:
+                                        cur.execute("UPDATE public.variants SET stock = stock + %s WHERE id = %s", 
+                                                    (int(row['qty']), int(row['variant_id'])))
+                                    
+                                    # 2. تحديث حالة الإرجاع
+                                    cur.execute("UPDATE public.returns SET status = 'Received' WHERE id = %s", (int(row['id']),))
+                                    
+                                    # 3. تسجيل مصروف (خصم المبلغ من الكاش)
+                                    reason_txt = f"استرجاع: {row['product_name']} - فاتورة #{row['sale_id']}"
+                                    cur.execute("INSERT INTO public.expenses (amount, reason, date) VALUES (%s, %s, %s)",
+                                                (float(row['return_amount']), reason_txt, get_baghdad_time()))
+                                    
+                                    conn.commit()
+                                    st.success("✅ تم استلام القطعة وإعادتها للمخزون بنجاح")
+                                    st.toast("✅ العملية تمت بنجاح")
+                                    st.cache_data.clear(); st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"حدث خطأ: {e}")
+            else:
+                st.info("🎉 لا توجد طلبات إرجاع معلقة حالياً")
+                
+        except Exception as e:
+            st.error(f"خطأ في جلب البيانات: {e}")
+
+    # === 4. العملاء ===
+    with tabs[3]:
         try:
             df_cust = pd.read_sql("""
                 SELECT 
@@ -549,8 +635,8 @@ def main_app():
         except Exception as e:
             st.error(f"حدث خطأ في عرض العملاء: {e}")
 
-    # === 4. المخزون ===
-    with tabs[3]:
+    # === 5. المخزون ===
+    with tabs[4]:
         if 'last_added_msg' in st.session_state and st.session_state['last_added_msg']:
             st.success(st.session_state['last_added_msg'])
             st.session_state['last_added_msg'] = None
@@ -734,8 +820,8 @@ def main_app():
         else:
             st.info("المخزون فارغ، أضيفي منتجات جديدة.")
 
-    # === 5. المصاريف ===
-    with tabs[4]:
+    # === 6. المصاريف ===
+    with tabs[5]:
         st.header("💸 إدارة المصاريف")
         
         with st.form("add_expense_form"):
@@ -788,8 +874,8 @@ def main_app():
         except:
             st.info("لا توجد مصاريف بعد")
 
-    # === 6. التقارير الذكية ===
-    with tabs[5]:
+    # === 7. التقارير الذكية ===
+    with tabs[6]:
         st.header("📊 ذكاء الأعمال (BI)")
         try:
             # --- حسابات التواريخ ---
