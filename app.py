@@ -417,6 +417,12 @@ def main_app():
 
                 if st.button("✅ إتمام البيع", type="primary"):
                     if not cust_name_val: st.error("الاسم مطلوب!"); st.stop()
+
+                    # التحقق من صحة رقم الهاتف (Validation)
+                    if cust_type == "جديد":
+                        if not cust_phone_val.isdigit() or len(cust_phone_val) != 11 or not cust_phone_val.startswith("07"):
+                            st.error("رقم الهاتف غير صحيح: يجب أن يتكون من 11 رقماً ويبدأ بـ 07")
+                            st.stop()
                     
                     try:
                         with conn.cursor() as cur:
