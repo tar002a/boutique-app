@@ -845,6 +845,34 @@ def main_app():
             exp_month = get_exp(f"to_char(date, 'YYYY-MM') = '{month_curr_str}'")
             exp_prev_month = get_exp(f"to_char(date, 'YYYY-MM') = '{month_prev_str}'")
 
+            # --- New: Invoice Counts Logic ---
+            # Calculate start of current week (assuming Saturday start)
+            days_since_sat = (now.weekday() - 5) % 7
+            this_week_start_date = now - timedelta(days=days_since_sat)
+            this_week_start_str = this_week_start_date.strftime("%Y-%m-%d")
+            
+            # Previous week (Entire last week)
+            last_week_start_date = this_week_start_date - timedelta(days=7)
+            last_week_start_str = last_week_start_date.strftime("%Y-%m-%d")
+            
+            # Get stats for these specific periods
+            stats_strict_curr_week = get_stats(f"date >= '{this_week_start_str}'")
+            stats_strict_prev_week = get_stats(f"date >= '{last_week_start_str}' AND date < '{this_week_start_str}'")
+            
+            inv_curr_week = stats_strict_curr_week[2]
+            inv_prev_week = stats_strict_prev_week[2]
+            inv_curr_month = stats_month[2]
+            inv_prev_month = stats_prev_month[2]
+
+            # --- Display New Metrics (Invoice Counts) ---
+            st.subheader("🔢 عدد الفواتير (Transactions)")
+            c_inv1, c_inv2, c_inv3, c_inv4 = st.columns(4)
+            c_inv1.metric("الأسبوع الحالي", f"{inv_curr_week} فاتورة")
+            c_inv2.metric("الأسبوع السابق", f"{inv_prev_week} فاتورة")
+            c_inv3.metric("الشهر الحالي", f"{inv_curr_month} فاتورة")
+            c_inv4.metric("الشهر السابق", f"{inv_prev_month} فاتورة")
+            st.divider()
+
             # عرض البيانات
             st.subheader("📅 ملخص المبيعات")
             
