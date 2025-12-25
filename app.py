@@ -891,7 +891,7 @@ def main_app():
                                     if qty_val <= 0: continue # Strict hide for size
                                     
                                     # Chip Style (Single line to avoid Markdown code block trigger)
-                                    chips_html += f"""<div style="border: 1px solid #3A3A3C; border-radius: 12px; padding: 2px 10px; margin: 2px; font-size: 0.85em; background-color: #2C2C2E; color: #FFF; display: flex; align-items: center; gap: 4px;"><span style="font-weight: bold;">{size_val}</span></div>"""
+                                    chips_html += f"""<div style="border: 1px solid #3A3A3C; border-radius: 12px; padding: 2px 10px; margin: 2px; font-size: 0.85em; background-color: #2C2C2E; color: #FFF; display: flex; align-items: center; gap: 4px;"><span style="font-weight: bold;">{size_val}</span><span style="font-size: 0.9em; opacity: 0.7; color: #FFD60A;">(x{qty_val})</span></div>"""
                                 
                                 chips_html += "</div>"
                                 st.markdown(chips_html, unsafe_allow_html=True)
