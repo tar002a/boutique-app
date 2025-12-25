@@ -281,29 +281,36 @@ def edit_stock_dialog(item_id, name, color, size, cost, price, stock):
                 st.cache_data.clear(); st.rerun()
         except: conn.rollback()
 
-# --- 3.5. دالة مساعدة للألوان ---
-def get_color_emoji(color_name):
+# --- 3.5. دوال مساعدة للألوان ---
+def get_color_hex(color_name):
     color_map = {
-        "أحمر": "🔴", "red": "🔴",
-        "أسود": "⚫", "black": "⚫",
-        "أبيض": "⚪", "white": "⚪",
-        "أزرق": "🔵", "blue": "🔵",
-        "أخضر": "🟢", "green": "🟢",
-        "أصفر": "🟡", "yellow": "🟡",
-        "بني": "🟤", "brown": "🟤",
-        "برتقالي": "🟠", "orange": "🟠",
-        "بنفسجي": "🟣", "purple": "🟣",
-        "وردي": "🌸", "pink": "🌸",
-        "رصاصي": "👽", "gray": "👽",
-        "ذهبي": "✨", "gold": "✨",
-        "فضي": "🥈", "silver": "🥈",
-        "بيج": "🍂", "beige": "🍂"
+        "أحمر": "#FF3B30", "red": "#FF3B30",
+        "أسود": "#000000", "black": "#000000",
+        "أبيض": "#FFFFFF", "white": "#FFFFFF",
+        "أزرق": "#007AFF", "blue": "#007AFF",
+        "نيلي": "#000080", "navy": "#000080",
+        "أخضر": "#34C759", "green": "#34C759",
+        "زيتوني": "#808000", "olive": "#808000",
+        "أصفر": "#FFD60A", "yellow": "#FFD60A",
+        "بني": "#A2845E", "brown": "#A2845E",
+        "برتقالي": "#FF9500", "orange": "#FF9500",
+        "بنفسجي": "#AF52DE", "purple": "#AF52DE",
+        "وردي": "#FF2D55", "pink": "#FF2D55",
+        "رصاصي": "#8E8E93", "gray": "#8E8E93",
+        "ذهبي": "#FFD700", "gold": "#FFD700",
+        "فضي": "#C0C0C0", "silver": "#C0C0C0",
+        "بيج": "#F5F5DC", "beige": "#F5F5DC",
+        "خمري": "#800000", "maroon": "#800000",
+        "سمائي": "#87CEEB", "cyan": "#87CEEB"
     }
-    # Simple normalization/lookup
-    if not color_name: return "🎨"
+    if not color_name: return "#8E8E93" # Default Grey
     for k, v in color_map.items():
         if k in color_name:
             return v
+    return "#8E8E93" # Default Grey
+
+def get_color_emoji(color_name):
+    # Keep for backward compatibility or other uses if needed
     return "🎨"
 
 @st.dialog("تعديل المخزون - بضاعة كاملة")
@@ -845,18 +852,65 @@ def main_app():
                     
                     # Expander for Product
                     with st.expander(f"{p_name} (العدد: {total_qty})"):
-                        # Group by Color
+                        
                         unique_colors = p_group['color'].unique()
                         for color in unique_colors:
                             c_group = p_group[p_group['color'] == color]
                             color_qty = c_group['stock'].sum()
-                            # Sort sizes naturally if possible, or just sort text
-                            sizes_list = sorted(c_group['size'].astype(str).tolist()) 
-                            sizes_str = ", ".join(sizes_list)
-                            emoji = get_color_emoji(color)
                             
-                            st.markdown(f"**{emoji} {color}:** &nbsp; {sizes_str} &nbsp; <span style='color:var(--subtext-color);'>(العدد: {color_qty})</span>", unsafe_allow_html=True)
-                        
+                            # Skip if no stock (Strict visual cleanup)
+                            if color_qty <= 0: continue
+
+                            # Layout: Color Info (Left) | Size Chips (Right)
+                            col_info, col_chips = st.columns([1, 3])
+                            
+                            # Left Column: Color Dot + Name
+                            hex_code = get_color_hex(color)
+                            border_style = "border: 1px solid #555;" if hex_code == "#000000" else ""
+                            
+                            with col_info:
+                                st.markdown(f"""
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <div style="width: 16px; height: 16px; border-radius: 50%; background-color: {hex_code}; {border_style}"></div>
+                                    <div style="font-weight: bold; font-size: 1em;">{color} <span style="font-weight: normal; color: var(--subtext-color); font-size: 0.9em;">({color_qty})</span></div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                            # Right Column: Size Chips
+                            with col_chips:
+                                chips_html = '<div style="display: flex; gap: 6px; flex-wrap: wrap;">'
+                                # Sort sizes
+                                sizes_list = sorted(c_group['size'].astype(str).tolist())
+                                
+                                for size_val in sizes_list:
+                                    # Get qty for this specific variant (size)
+                                    # Since c_group is filtered by color, we filter by size
+                                    size_row = c_group[c_group['size'] == size_val]
+                                    if size_row.empty: continue
+                                    qty_val = size_row['stock'].sum()
+                                    if qty_val <= 0: continue # Strict hide for size
+                                    
+                                    # Chip Style
+                                    chips_html += f"""
+                                    <div style="
+                                        border: 1px solid #3A3A3C; 
+                                        border-radius: 12px; 
+                                        padding: 2px 10px; 
+                                        margin: 2px; 
+                                        font-size: 0.85em; 
+                                        background-color: #2C2C2E; 
+                                        color: #FFF; 
+                                        display: flex; 
+                                        align-items: center; 
+                                        gap: 4px;">
+                                        <span style="font-weight: bold;">{size_val}</span>
+                                    </div>
+                                    """
+                                chips_html += "</div>"
+                                st.markdown(chips_html, unsafe_allow_html=True)
+                            
+                            st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True) # Spacer
+
                         st.divider()
                         if st.button("✏️ تعديل الكميات", key=f"edit_stk_{hash(p_name)}"):
                             edit_product_stock_dialog(p_name)
